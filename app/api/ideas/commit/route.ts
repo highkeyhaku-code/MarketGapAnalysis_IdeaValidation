@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (ideaErr || !newIdea) {
+        console.error("[API /api/ideas/commit] Error creating idea record:", ideaErr);
         throw new Error(`Failed to create idea parent record: ${ideaErr?.message}`);
       }
       ideaId = newIdea.id;
@@ -61,11 +62,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (commitErr) {
+      console.error("[API /api/ideas/commit] Error inserting idea_commit:", commitErr);
       throw new Error(`Failed to insert idea_commit: ${commitErr.message}`);
     }
 
     // 4. 初期 job_status を作成
-    await supabaseAdmin.from("job_status").insert({
+    const { error: jobErr } = await supabaseAdmin.from("job_status").insert({
       id: jobId,
       user_id: userId,
       status: "INITIALIZING_CRASH_ENGINE",
@@ -73,6 +75,10 @@ export async function POST(req: NextRequest) {
       error_message: null,
       result_data: null,
     });
+
+    if (jobErr) {
+      console.error("[API /api/ideas/commit] Error creating job_status:", jobErr);
+    }
 
     // 5. Inngest ジョブを発火
     await inngest.send({
@@ -99,6 +105,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("[API /api/ideas/commit] Error processing commit request:", message, stack);
+    return NextResponse.json(
+      { success: false, error: message, stack: process.env.NODE_ENV === "development" ? stack : undefined },
+      { status: 500 }
+    );
   }
 }
