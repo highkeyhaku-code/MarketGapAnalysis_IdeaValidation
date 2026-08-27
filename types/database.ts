@@ -12,34 +12,43 @@ export type Database = {
       genres: {
         Row: {
           id: string;
-          level: 1 | 2 | 3;
+          level: number;
           parent_id: string | null;
           canonical_name: string;
           description: string | null;
-          status: 'active' | 'stagnant' | 'deprecated';
+          status: string;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          level: 1 | 2 | 3;
+          level: number;
           parent_id?: string | null;
           canonical_name: string;
           description?: string | null;
-          status?: 'active' | 'stagnant' | 'deprecated';
+          status?: string;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          level?: 1 | 2 | 3;
+          level?: number;
           parent_id?: string | null;
           canonical_name?: string;
           description?: string | null;
-          status?: 'active' | 'stagnant' | 'deprecated';
+          status?: string;
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "genres_parent_id_fkey";
+            columns: ["parent_id"];
+            isOneToOne: false;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       source_topic_mappings: {
         Row: {
@@ -69,12 +78,21 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "source_topic_mappings_genre_id_fkey";
+            columns: ["genre_id"];
+            isOneToOne: false;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       rankings: {
         Row: {
           id: string;
           genre_id: string;
-          rank_list: Json; // [{ "app_id": "UUID", "rank": number }]
+          rank_list: Json;
           last_computed_at: string | null;
           created_at: string;
           updated_at: string;
@@ -95,6 +113,15 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "rankings_genre_id_fkey";
+            columns: ["genre_id"];
+            isOneToOne: false;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       apps: {
         Row: {
@@ -139,6 +166,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       app_genres: {
         Row: {
@@ -156,6 +184,22 @@ export type Database = {
           genre_id?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "app_genres_app_id_fkey";
+            columns: ["app_id"];
+            isOneToOne: false;
+            referencedRelation: "apps";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "app_genres_genre_id_fkey";
+            columns: ["genre_id"];
+            isOneToOne: false;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       market_cache: {
         Row: {
@@ -179,29 +223,39 @@ export type Database = {
           updated_at?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "market_cache_genre_id_fkey";
+            columns: ["genre_id"];
+            isOneToOne: true;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       users: {
         Row: {
           id: string;
           credits_balance: number;
-          plan_tier: 'free' | 'bootstrapper' | 'founder' | 'studio';
+          plan_tier: string;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id: string;
           credits_balance?: number;
-          plan_tier?: 'free' | 'bootstrapper' | 'founder' | 'studio';
+          plan_tier?: string;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
           credits_balance?: number;
-          plan_tier?: 'free' | 'bootstrapper' | 'founder' | 'studio';
+          plan_tier?: string;
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       ideas: {
         Row: {
@@ -225,6 +279,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       idea_commits: {
         Row: {
@@ -278,6 +333,22 @@ export type Database = {
           share_token?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: "idea_commits_idea_id_fkey";
+            columns: ["idea_id"];
+            isOneToOne: false;
+            referencedRelation: "ideas";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "idea_commits_parent_commit_id_fkey";
+            columns: ["parent_commit_id"];
+            isOneToOne: false;
+            referencedRelation: "idea_commits";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       job_status: {
         Row: {
@@ -310,7 +381,11 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
+    };
+    Views: {
+      [_ in never]: never;
     };
     Functions: {
       manual_cache_revalidate: {
@@ -326,6 +401,12 @@ export type Database = {
         };
         Returns: Json;
       };
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
     };
   };
 };
