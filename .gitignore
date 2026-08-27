@@ -1,5 +1,9 @@
 PROJECT_CONTEXT.md
 環境構築.md
+overall-uiux-architecture-design-record.md
+system-architecture-design-record.md
+phase2-validate-design-record.md
+phase1-discover-design-record.md
 
 .env.local
 .env*.local
