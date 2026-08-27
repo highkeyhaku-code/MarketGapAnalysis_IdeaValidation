@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  LayoutDashboard,
   Compass,
   GitBranch,
   Search,
@@ -12,10 +13,10 @@ import {
   Layers,
   Flame,
   Zap,
-  TrendingUp,
   RotateCcw,
   CheckCircle2,
 } from "lucide-react";
+import { TheGarageKanban } from "../components/TheGarageKanban";
 import { JobPollingTracker } from "../components/JobPollingTracker";
 import { GravityMapVisualizer, GravityMapData } from "../components/GravityMapVisualizer";
 
@@ -42,7 +43,7 @@ const POPULAR_GENRES = [
 
 export default function GarageDashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"discover" | "validate">("discover");
+  const [activeTab, setActiveTab] = useState<"kanban" | "discover" | "validate">("kanban");
   const [selectedGenre, setSelectedGenre] = useState(POPULAR_GENRES[0].name);
   const [customKeyword, setCustomKeyword] = useState("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -83,7 +84,6 @@ export default function GarageDashboard() {
     if (resultData && resultData.companies) {
       setMapResult(resultData as GravityMapData);
     } else {
-      // フォールバック用データ構造
       setMapResult({
         genreId: "cached-genre",
         genreName: analyzingGenreName || selectedGenre,
@@ -94,11 +94,11 @@ export default function GarageDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white pb-16">
       {/* ナビゲーションバー */}
       <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-lg sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab("kanban")}>
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-[0_0_16px_rgba(99,102,241,0.5)]">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
@@ -115,6 +115,18 @@ export default function GarageDashboard() {
           {/* モード切替タブ */}
           <div className="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
             <button
+              onClick={() => setActiveTab("kanban")}
+              className={`flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                activeTab === "kanban"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>Kanban Hub</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab("discover")}
               className={`flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
                 activeTab === "discover"
@@ -123,7 +135,7 @@ export default function GarageDashboard() {
               }`}
             >
               <Compass className="w-4 h-4" />
-              <span>Discover (市場の穴調査)</span>
+              <span>Discover (重力マップ)</span>
             </button>
 
             <button
@@ -152,10 +164,19 @@ export default function GarageDashboard() {
       {/* メインコンテンツ */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
         {/* ========================================================================= */}
+        {/* モード 0: KANBAN HUB */}
+        {/* ========================================================================= */}
+        {activeTab === "kanban" && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <TheGarageKanban />
+          </div>
+        )}
+
+        {/* ========================================================================= */}
         {/* モード 1: DISCOVER (市場の穴調査) */}
         {/* ========================================================================= */}
         {activeTab === "discover" && (
-          <div className="space-y-8">
+          <div className="space-y-8 animate-in fade-in duration-300">
             {/* ヒーローバナー */}
             <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-purple-950/40 border border-slate-800 p-8 shadow-2xl">
               <div className="max-w-2xl space-y-3">
@@ -267,7 +288,7 @@ export default function GarageDashboard() {
         {/* モード 2: VALIDATION (Git for Ideas & 仮説クラッシュ) */}
         {/* ========================================================================= */}
         {activeTab === "validate" && (
-          <div className="space-y-6 max-w-4xl mx-auto">
+          <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in duration-300">
             <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 space-y-4">
               <div className="inline-flex items-center space-x-2 px-3 py-1 bg-purple-500/10 border border-purple-500/20 rounded-full text-purple-400 text-xs font-medium">
                 <GitBranch className="w-3.5 h-3.5 text-purple-400" />
@@ -280,42 +301,13 @@ export default function GarageDashboard() {
                 あなたのアイデアをイミュータブルなコミット履歴として管理し、GitHubの過去の死骸リポジトリ（放棄された類似プロジェクト）と照合して3xペナルティスコアを算出します。
               </p>
 
-              <div className="p-6 bg-slate-950 rounded-2xl border border-slate-800/80 space-y-4 text-xs">
-                <div className="space-y-2">
-                  <label className="font-semibold text-slate-300 block">Q1: Target Pain (対象のペイン - 30〜1000文字)</label>
-                  <textarea
-                    rows={3}
-                    placeholder="例: 中小企業のリモートチームにおいて、プロジェクト管理ツールの設定とAPI連携が複雑すぎてメンバーが定着しない..."
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="font-semibold text-slate-300 block">Q2: Solution (提供する解決策 - 30〜1000文字)</label>
-                  <textarea
-                    rows={3}
-                    placeholder="例: 自然言語で指示するだけで、プロジェクトのワークフローと権限設定が全自動構築されるAIネイティブ管理ハブ..."
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="font-semibold text-slate-300 block">Q3: Core Edge (競合に対するコアな優位性 - 20〜1000文字)</label>
-                  <input
-                    type="text"
-                    placeholder="例: 既存のSaaS APIと0-configで双方向同期し、初期学習コストをゼロにする"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition"
-                  />
-                </div>
-
-                <button
-                  onClick={() => router.push("/validate")}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center space-x-2"
-                >
-                  <GitBranch className="w-4 h-4" />
-                  <span>Launch Full Idea Wizard & Run Reality Crash Engine</span>
-                </button>
-              </div>
+              <button
+                onClick={() => router.push("/validate")}
+                className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-sm rounded-2xl shadow-xl shadow-purple-600/30 transition cursor-pointer flex items-center justify-center space-x-2"
+              >
+                <GitBranch className="w-5 h-5" />
+                <span>Launch Full Multi-Step Idea Wizard & Crash Engine</span>
+              </button>
             </div>
           </div>
         )}
