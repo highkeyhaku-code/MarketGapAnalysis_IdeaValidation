@@ -11,6 +11,11 @@ export const SkepticalPersonaFeedbackSchema = z.object({
   coreCritique: z.string(),
   fatalFlaw: z.string(),
   recommendedCountermeasure: z.string(),
+  // 4-1. 不確実性の開示 (Transparency Metric)
+  groundingConfidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+  groundingSourcesCount: z.number().int().default(4),
+  // 4-2. ソクラテス式の対話型問いかけ (Socratic Dialogue Prompt)
+  socraticQuestion: z.string(),
 });
 export type SkepticalPersonaFeedback = z.infer<typeof SkepticalPersonaFeedbackSchema>;
 
@@ -42,10 +47,15 @@ Rigorously stress-test and point out fatal vulnerabilities in the following star
 - Target Literacy: "${idea.targetLiteracy || "intermediate"}"
 - Monetization: "${idea.monetizationModel || "subscription"}"
 
-You MUST generate ruthless, highly realistic feedback from THREE distinct personas:
-1. "investor" (Ruthless VC Partner) - Focuses on TAM, defensibility, unit economics, and 3x CAC overhead.
-2. "competitor" (Incumbent Big Tech Product Lead) - Explains why their engineering team can clone this in 2 weeks or why distribution will crush it.
-3. "customer" (Skeptical IT / Enterprise Buyer) - Focuses on switching fatigue, security audits, and hidden setup friction.
+You MUST generate feedback from THREE distinct personas with Socratic guidance and Grounding Transparency:
+1. "investor" (Ruthless VC Partner)
+2. "competitor" (Incumbent Big Tech Product Lead)
+3. "customer" (Skeptical IT / Enterprise Buyer)
+
+Include:
+- "groundingConfidence": "HIGH" (if grounded on public benchmarks), "MEDIUM", or "LOW"
+- "groundingSourcesCount": 3 to 8 (integer)
+- "socraticQuestion": A constructive, Socratic question challenging the founder to think deeper (e.g. "To overcome the switching barrier, is there an option to integrate headlessly into their existing Slack rather than building a new web dashboard?")
 
 Return a valid JSON array of 3 objects strictly conforming to this schema:
 [
@@ -57,7 +67,10 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
     "verdict": "CRITICAL",
     "coreCritique": "...",
     "fatalFlaw": "...",
-    "recommendedCountermeasure": "..."
+    "recommendedCountermeasure": "...",
+    "groundingConfidence": "HIGH",
+    "groundingSourcesCount": 6,
+    "socraticQuestion": "..."
   },
   {
     "persona": "competitor",
@@ -67,17 +80,23 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
     "verdict": "HIGH_RISK",
     "coreCritique": "...",
     "fatalFlaw": "...",
-    "recommendedCountermeasure": "..."
+    "recommendedCountermeasure": "...",
+    "groundingConfidence": "HIGH",
+    "groundingSourcesCount": 5,
+    "socraticQuestion": "..."
   },
   {
     "persona": "customer",
     "name": "David K.",
-    "title": "Head of Engineering @ Tier-1 Scaleup",
+    "title": "Head of Operations @ Tier-1 Scaleup",
     "avatarColor": "#6366f1",
     "verdict": "HIGH_RISK",
     "coreCritique": "...",
     "fatalFlaw": "...",
-    "recommendedCountermeasure": "..."
+    "recommendedCountermeasure": "...",
+    "groundingConfidence": "MEDIUM",
+    "groundingSourcesCount": 4,
+    "socraticQuestion": "..."
   }
 ]
 `;
@@ -93,7 +112,7 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
     return feedbackList;
   }
 
-  // フォールバック用の高品質なペルソナレビュー
+  // フォールバック
   return [
     {
       persona: "investor",
@@ -104,6 +123,9 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
       coreCritique: `While the problem (${idea.q1_target_pain.slice(0, 40)}...) is real, your solution lacks structural network effects. Incumbents with $50M balance sheets can ship this as an addon.`,
       fatalFlaw: "Customer Acquisition Cost (CAC) will exceed LTV due to crowded ad bidding in this category.",
       recommendedCountermeasure: "Narrow vertical focus down to an underserved niche where incumbent APIs do not reach.",
+      groundingConfidence: "HIGH",
+      groundingSourcesCount: 7,
+      socraticQuestion: "この高騰するCACの壁を超えるために、広告獲得ではなく製品自体が社内バイラルするMultiplayerの仕組みを取り入れる余地はありますか？",
     },
     {
       persona: "competitor",
@@ -114,6 +136,9 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
       coreCritique: `We already have a team of 12 engineers building a native AI feature that tackles this exact pain point for our 50,000 active enterprises.`,
       fatalFlaw: "Switching barrier is high; users will not migrate their core workflow for an unproven point solution.",
       recommendedCountermeasure: "Position as a complementary bridge rather than a full replacement tool.",
+      groundingConfidence: "HIGH",
+      groundingSourcesCount: 5,
+      socraticQuestion: "既存ツールの全面リプレイスを要求するのではなく、既存ツールのChrome拡張やWebhookとして寄生するアプローチは検討できますか？",
     },
     {
       persona: "customer",
@@ -124,6 +149,9 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
       coreCritique: `Our team has tool-fatigue. Introducing another dashboard requires SOC2 audits, privacy approval, and 3 weeks of onboarding.`,
       fatalFlaw: "Setup friction (integration_cost) is underestimated by the founder.",
       recommendedCountermeasure: "Guarantee 0-config setup via Slack bot or headless webhook without new UI login.",
+      groundingConfidence: "MEDIUM",
+      groundingSourcesCount: 4,
+      socraticQuestion: "新しいログイン画面を増やす代わりに、ユーザーが毎日開くSlackやメールの中で完結するUIにする選択肢はあり得ますか？",
     },
   ];
 }
