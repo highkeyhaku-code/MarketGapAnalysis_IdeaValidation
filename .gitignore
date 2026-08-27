@@ -9,5 +9,7 @@ phase1-discover-design-record.md
 .env*.local
 .env.*
 node_modules
+.next/
+out/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
