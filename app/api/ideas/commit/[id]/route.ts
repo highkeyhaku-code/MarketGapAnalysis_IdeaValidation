@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../../../lib/supabaseClient";
+import { z } from "zod";
+
+const UUID_SCHEMA = z.string().uuid();
 
 /**
  * コミットデータ取得 API
@@ -15,6 +18,18 @@ export async function GET(
       return NextResponse.json({ error: "Commit ID is required" }, { status: 400 });
     }
 
+    // UUID フォーマットの厳格バリデーション (ダミー文字列や不正IDを早期遮断)
+    const uuidParseResult = UUID_SCHEMA.safeParse(id);
+    if (!uuidParseResult.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Invalid Commit ID format: "${id}". A valid RFC 4122 UUID is required.`,
+        },
+        { status: 400 }
+      );
+    }
+
     const { data: commit, error } = await supabaseAdmin
       .from("idea_commits")
       .select("*, ideas(title, user_id)")
@@ -22,7 +37,10 @@ export async function GET(
       .single();
 
     if (error || !commit) {
-      return NextResponse.json({ error: error?.message || "Commit not found" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: error?.message || `Commit "${id}" not found in database.` },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({ success: true, commit });

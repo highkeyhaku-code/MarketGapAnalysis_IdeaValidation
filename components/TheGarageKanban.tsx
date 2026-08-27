@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   DragDropContext,
   Droppable,
@@ -23,6 +23,7 @@ import {
   X,
   FileText,
   Trash2,
+  Layers,
 } from "lucide-react";
 import { IdeaWizard } from "./IdeaWizard";
 import { IdeaInput, PhysicalElement } from "../schemas/zod";
@@ -31,8 +32,8 @@ export type KanbanColumnId = "DRAFT" | "DISCOVERED" | "VALIDATING" | "VALIDATED"
 
 export interface KanbanCardItem {
   id: string;
-  commitId?: string;
-  ideaId?: string;
+  commitId: string;
+  ideaId: string;
   title: string;
   targetPain: string;
   solution: string;
@@ -86,58 +87,78 @@ const COLUMN_CONFIG: Record<
   },
 };
 
-const INITIAL_CARDS: KanbanCardItem[] = [
-  {
-    id: "card-1",
-    commitId: "c-101",
-    ideaId: "idea-1",
-    title: "0-Config CRM Sync AI",
-    targetPain: "営業担当者がCRM入力に追われ、リード入力の形骸化と情報欠落が多発している。",
-    solution: "商談音声をリアルタイム解析し、議事録要約・CRM項目を0クリックで全自動同期する。",
-    coreEdge: "0-config双方向同期で導入コストと学習コストをゼロにする。",
-    score: 78,
-    version: "v1.2",
-    columnId: "VALIDATED",
-    createdAt: "2026-08-27",
-  },
-  {
-    id: "card-2",
-    commitId: "c-102",
-    ideaId: "idea-2",
-    title: "AI Video Fast Clipper",
-    targetPain: "長尺動画の切り抜きと字幕配置に編集者が1本3時間かけている。",
-    solution: "バイラルスコアの高い瞬間を自動抽出し、縦型9:16動画を1クリックで量産する。",
-    coreEdge: "高速レンダリングとソーシャルバイラル予測モデル。",
-    score: 42,
-    version: "v1.0",
-    columnId: "DISCOVERED",
-    createdAt: "2026-08-26",
-  },
-  {
-    id: "card-3",
-    commitId: "c-103",
-    ideaId: "idea-3",
-    title: "Micro-SaaS Billing Engine",
-    targetPain: "Stripeの設定と税率計算が複雑で、個人の開発者が海外販売を躊躇している。",
-    solution: "1行のSDK導入でグローバルMoR（販売業者代理）決済とインボイス発行を完結する。",
-    coreEdge: "ゼロ開発・1分で決済開始できる超低導入コスト。",
-    score: null,
-    version: "v0.1",
-    columnId: "DRAFT",
-    createdAt: "2026-08-27",
-  },
-];
-
 export function TheGarageKanban() {
   const router = useRouter();
-  const [cards, setCards] = useState<KanbanCardItem[]>(INITIAL_CARDS);
+  const [cards, setCards] = useState<KanbanCardItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "info" | "success" | "warning" } | null>(null);
   const [editingCardForWizard, setEditingCardForWizard] = useState<KanbanCardItem | null>(null);
+  const [isCreatingDraft, setIsCreatingDraft] = useState(false);
 
   const showToast = (text: string, type: "info" | "success" | "warning" = "info") => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+  // 1. 本番 DB からのアイデア・コミット一覧フェッチ
+  useEffect(() => {
+    const fetchIdeasFromDb = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("/api/ideas");
+        const json = await res.json();
+        if (json.success && Array.isArray(json.ideas)) {
+          const loadedCards: KanbanCardItem[] = [];
+
+          json.ideas.forEach((idea: any) => {
+            const commits = idea.idea_commits || [];
+            if (commits.length === 0) return;
+
+            // 最新コミットを採用
+            const latestCommit = commits[commits.length - 1];
+            let columnId: KanbanColumnId = "DRAFT";
+
+            if (latestCommit.status === "completed" || latestCommit.status === "validated") {
+              columnId = "VALIDATED";
+            } else if (latestCommit.status === "analyzing") {
+              columnId = "VALIDATING";
+            } else if (latestCommit.status === "archived") {
+              columnId = "ARCHIVED";
+            } else if (
+              latestCommit.q1_target_pain &&
+              latestCommit.q1_target_pain.length >= 30 &&
+              !latestCommit.q1_target_pain.startsWith("未定義")
+            ) {
+              columnId = "DISCOVERED";
+            }
+
+            loadedCards.push({
+              id: latestCommit.id,
+              commitId: latestCommit.id,
+              ideaId: idea.id,
+              title: idea.title || "Untitled Idea",
+              targetPain: latestCommit.q1_target_pain || "",
+              solution: latestCommit.q2_solution || "",
+              coreEdge: latestCommit.q3_core_edge || "",
+              score: latestCommit.emotional_score,
+              version: `v1.${commits.length - 1}`,
+              columnId,
+              createdAt: latestCommit.created_at ? new Date(latestCommit.created_at).toLocaleDateString() : "Just now",
+              parentCommitId: latestCommit.parent_commit_id,
+            });
+          });
+
+          setCards(loadedCards);
+        }
+      } catch (err) {
+        console.error("Failed to load cards from database:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchIdeasFromDb();
+  }, []);
 
   // ドラッグ＆ドロップ終了時のハンドラ
   const onDragEnd = async (result: DropResult) => {
@@ -152,17 +173,15 @@ export function TheGarageKanban() {
 
     if (!card) return;
 
-    // 1-2. イベントハンドラ分岐
-
     // [ケース 1]: DRAFT -> DISCOVERED (入力バリデーションチェック)
     if (sourceCol === "DRAFT" && destCol === "DISCOVERED") {
-      const isQ1Valid = card.targetPain.trim().length >= 30;
-      const isQ2Valid = card.solution.trim().length >= 30;
+      const isQ1Valid = card.targetPain.trim().length >= 30 && !card.targetPain.startsWith("未定義");
+      const isQ2Valid = card.solution.trim().length >= 30 && !card.solution.startsWith("未定義");
 
       if (!isQ1Valid || !isQ2Valid) {
         showToast("⚠️ Q1/Q2の文字数が30文字未満です。ウィザードで思考を深めてください。", "warning");
         setEditingCardForWizard(card);
-        return; // リバート (状態変更しない)
+        return; // リバート
       }
     }
 
@@ -183,6 +202,7 @@ export function TheGarageKanban() {
               q4_monetization_model: "subscription",
               q4_supplementary_pains: [],
             },
+            ideaId: card.ideaId,
             domain: "B2B_SME",
           }),
         });
@@ -224,20 +244,44 @@ export function TheGarageKanban() {
     });
   };
 
-  // 新規ドラフトカード追加
-  const handleAddNewDraft = () => {
-    const newCard: KanbanCardItem = {
-      id: `card-${Date.now()}`,
-      title: "新規仮説ドラフト",
-      targetPain: "未定義のペイン...",
-      solution: "未定義のソリューション...",
-      coreEdge: "未定義のコア優位性...",
-      version: "v0.1",
-      columnId: "DRAFT",
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
-    setCards((prev) => [newCard, ...prev]);
-    setEditingCardForWizard(newCard);
+  // 新規ドラフトカード追加 (本番 DB に INSERT して正規 UUID を取得)
+  const handleAddNewDraft = async () => {
+    try {
+      setIsCreatingDraft(true);
+      const res = await fetch("/api/ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "新規仮説ドラフト",
+        }),
+      });
+      const json = await res.json();
+
+      if (json.success && json.commit && json.idea) {
+        const newCard: KanbanCardItem = {
+          id: json.commit.id,
+          commitId: json.commit.id,
+          ideaId: json.idea.id,
+          title: json.idea.title,
+          targetPain: json.commit.q1_target_pain,
+          solution: json.commit.q2_solution,
+          coreEdge: json.commit.q3_core_edge,
+          version: "v0.1",
+          columnId: "DRAFT",
+          createdAt: new Date().toLocaleDateString(),
+        };
+
+        setCards((prev) => [newCard, ...prev]);
+        setEditingCardForWizard(newCard);
+        showToast("✨ 新規ドラフトを作成しました。ウィザードで詳細を入力してください。", "info");
+      } else {
+        alert(`Failed to create draft in database: ${json.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      alert(`Network error creating draft: ${err.message}`);
+    } finally {
+      setIsCreatingDraft(false);
+    }
   };
 
   // ウィザード完了時の反映
@@ -281,142 +325,156 @@ export function TheGarageKanban() {
         </div>
 
         <button
+          disabled={isCreatingDraft}
           onClick={handleAddNewDraft}
-          className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+          className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
-          <span>New Hypothesis Draft</span>
+          {isCreatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          <span>{isCreatingDraft ? "Creating..." : "New Hypothesis Draft"}</span>
         </button>
       </div>
 
-      {/* カンバンボードコンテナ */}
-      <DragDropContext onDragEnd={onDragEnd}>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          {columns.map((colId) => {
-            const col = COLUMN_CONFIG[colId];
-            const colCards = cards.filter((c) => c.columnId === colId);
-            const Icon = col.icon;
+      {loading ? (
+        <div className="py-20 text-center text-xs text-slate-400 font-mono flex items-center justify-center space-x-2">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>Loading ideas from database...</span>
+        </div>
+      ) : (
+        /* カンバンボードコンテナ */
+        <DragDropContext onDragEnd={onDragEnd}>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {columns.map((colId) => {
+              const col = COLUMN_CONFIG[colId];
+              const colCards = cards.filter((c) => c.columnId === colId);
+              const Icon = col.icon;
 
-            return (
-              <div
-                key={colId}
-                className={`flex flex-col rounded-2xl border ${col.borderColor} ${col.bg} p-4 min-h-[480px] shadow-lg`}
-              >
-                {/* カラムヘッダー */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-3">
-                  <div className="flex items-center space-x-2">
-                    <Icon className={`w-4 h-4 ${col.color}`} />
-                    <span className="font-bold text-xs text-slate-200">{col.label}</span>
+              return (
+                <div
+                  key={colId}
+                  className={`flex flex-col rounded-2xl border ${col.borderColor} ${col.bg} p-4 min-h-[480px] shadow-lg`}
+                >
+                  {/* カラムヘッダー */}
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Icon className={`w-4 h-4 ${col.color}`} />
+                      <span className="font-bold text-xs text-slate-200">{col.label}</span>
+                    </div>
+                    <span className="px-2 py-0.5 bg-slate-900 text-slate-400 text-[10px] font-mono rounded-md border border-slate-800">
+                      {colCards.length}
+                    </span>
                   </div>
-                  <span className="px-2 py-0.5 bg-slate-900 text-slate-400 text-[10px] font-mono rounded-md border border-slate-800">
-                    {colCards.length}
-                  </span>
-                </div>
 
-                {/* Droppable エリア */}
-                <Droppable droppableId={colId}>
-                  {(provided, snapshot) => (
-                    <div
-                      ref={provided.innerRef}
-                      {...provided.droppableProps}
-                      className={`flex-1 space-y-3 transition rounded-xl p-1 ${
-                        snapshot.isDraggingOver ? "bg-indigo-500/5 ring-2 ring-indigo-500/30" : ""
-                      }`}
-                    >
-                      {colCards.map((card, index) => (
-                        <Draggable key={card.id} draggableId={card.id} index={index}>
-                          {(dragProvided, dragSnapshot) => (
-                            <div
-                              ref={dragProvided.innerRef}
-                              {...dragProvided.draggableProps}
-                              {...dragProvided.dragHandleProps}
-                              className={`p-4 rounded-2xl bg-slate-900 border transition shadow-md select-none group relative ${
-                                dragSnapshot.isDragging
-                                  ? "border-indigo-500 shadow-2xl scale-105 rotate-1 bg-slate-850 z-50"
-                                  : "border-slate-800 hover:border-slate-700 hover:bg-slate-850"
-                              }`}
-                            >
-                              {/* カードヘッダー */}
-                              <div className="flex items-center justify-between text-xs mb-2">
-                                <span className="px-2 py-0.5 bg-slate-950 font-mono text-[10px] text-indigo-400 rounded-md border border-slate-800">
-                                  {card.version}
-                                </span>
-                                {card.score !== null && card.score !== undefined && (
-                                  <span
-                                    className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                                      card.score >= 60
-                                        ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
-                                        : "bg-rose-500/10 text-rose-300 border border-rose-500/30"
-                                    }`}
-                                  >
-                                    Score: {card.score}
+                  {/* Droppable エリア */}
+                  <Droppable droppableId={colId}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`flex-1 space-y-3 transition rounded-xl p-1 ${
+                          snapshot.isDraggingOver ? "bg-indigo-500/5 ring-2 ring-indigo-500/30" : ""
+                        }`}
+                      >
+                        {colCards.length === 0 && (
+                          <div className="py-12 text-center text-[11px] text-slate-500 font-mono select-none">
+                            No cards in {colId}
+                          </div>
+                        )}
+
+                        {colCards.map((card, index) => (
+                          <Draggable key={card.id} draggableId={card.id} index={index}>
+                            {(dragProvided, dragSnapshot) => (
+                              <div
+                                ref={dragProvided.innerRef}
+                                {...dragProvided.draggableProps}
+                                {...dragProvided.dragHandleProps}
+                                className={`p-4 rounded-2xl bg-slate-900 border transition shadow-md select-none group relative ${
+                                  dragSnapshot.isDragging
+                                    ? "border-indigo-500 shadow-2xl scale-105 rotate-1 bg-slate-850 z-50"
+                                    : "border-slate-800 hover:border-slate-700 hover:bg-slate-850"
+                                }`}
+                              >
+                                {/* カードヘッダー */}
+                                <div className="flex items-center justify-between text-xs mb-2">
+                                  <span className="px-2 py-0.5 bg-slate-950 font-mono text-[10px] text-indigo-400 rounded-md border border-slate-800">
+                                    {card.version}
                                   </span>
-                                )}
-                              </div>
+                                  {card.score !== null && card.score !== undefined && (
+                                    <span
+                                      className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                        card.score >= 60
+                                          ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                                          : "bg-rose-500/10 text-rose-300 border border-rose-500/30"
+                                      }`}
+                                    >
+                                      Score: {card.score}
+                                    </span>
+                                  )}
+                                </div>
 
-                              {/* タイトル & ペイン */}
-                              <h4 className="font-bold text-sm text-slate-100 line-clamp-1 mb-1">
-                                {card.title}
-                              </h4>
-                              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                                {card.targetPain}
-                              </p>
+                                {/* タイトル & ペイン */}
+                                <h4 className="font-bold text-sm text-slate-100 line-clamp-1 mb-1">
+                                  {card.title}
+                                </h4>
+                                <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                                  {card.targetPain}
+                                </p>
 
-                              {/* アクションバー */}
-                              <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                                <span className="font-mono text-[10px] text-slate-500">{card.createdAt}</span>
+                                {/* アクションバー */}
+                                <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                                  <span className="font-mono text-[10px] text-slate-500">{card.createdAt}</span>
 
-                                <div className="flex items-center space-x-1.5">
-                                  {/* 検証結果リンク */}
-                                  {card.commitId && (
+                                  <div className="flex items-center space-x-1.5">
+                                    {/* 検証結果リンク */}
+                                    {card.commitId && (
+                                      <button
+                                        type="button"
+                                        onClick={() => router.push(`/validate/${card.commitId}/result`)}
+                                        className="p-1 hover:text-indigo-300 hover:bg-slate-800 rounded-md transition"
+                                        title="検証結果を開く"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+
+                                    {/* ピボットボタン */}
+                                    {card.commitId && (
+                                      <button
+                                        type="button"
+                                        onClick={() => router.push(`/validate?pivotFrom=${card.commitId}`)}
+                                        className="p-1 hover:text-purple-300 hover:bg-slate-800 rounded-md transition"
+                                        title="このコミットからピボット"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+
+                                    {/* 編集ボタン */}
                                     <button
                                       type="button"
-                                      onClick={() => router.push(`/validate/${card.commitId}/result`)}
-                                      className="p-1 hover:text-indigo-300 hover:bg-slate-800 rounded-md transition"
-                                      title="検証結果を開く"
+                                      onClick={() => setEditingCardForWizard(card)}
+                                      className="p-1 hover:text-slate-200 hover:bg-slate-800 rounded-md transition"
+                                      title="ウィザードで編集"
                                     >
-                                      <ExternalLink className="w-3.5 h-3.5" />
+                                      <FileText className="w-3.5 h-3.5" />
                                     </button>
-                                  )}
-
-                                  {/* ピボットボタン */}
-                                  {card.commitId && (
-                                    <button
-                                      type="button"
-                                      onClick={() => router.push(`/validate?pivotFrom=${card.commitId}`)}
-                                      className="p-1 hover:text-purple-300 hover:bg-slate-800 rounded-md transition"
-                                      title="このコミットからピボット"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-
-                                  {/* 編集ボタン */}
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingCardForWizard(card)}
-                                    className="p-1 hover:text-slate-200 hover:bg-slate-800 rounded-md transition"
-                                    title="ウィザードで編集"
-                                  >
-                                    <FileText className="w-3.5 h-3.5" />
-                                  </button>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-              </div>
-            );
-          })}
-        </div>
-      </DragDropContext>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              );
+            })}
+          </div>
+        </DragDropContext>
+      )}
 
-      {/* ウィザードモーダル (未入力リバート時や編集時) */}
+      {/* ウィザードモーダル */}
       {editingCardForWizard && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-300">
           <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
@@ -437,9 +495,9 @@ export function TheGarageKanban() {
 
             <IdeaWizard
               initialValues={{
-                q1_target_pain: editingCardForWizard.targetPain,
-                q2_solution: editingCardForWizard.solution,
-                q3_core_edge: editingCardForWizard.coreEdge,
+                q1_target_pain: editingCardForWizard.targetPain.startsWith("未定義") ? "" : editingCardForWizard.targetPain,
+                q2_solution: editingCardForWizard.solution.startsWith("未定義") ? "" : editingCardForWizard.solution,
+                q3_core_edge: editingCardForWizard.coreEdge.startsWith("未定義") ? "" : editingCardForWizard.coreEdge,
               }}
               onSubmit={handleWizardComplete}
             />
