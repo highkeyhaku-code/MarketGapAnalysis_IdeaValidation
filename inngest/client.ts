@@ -23,8 +23,10 @@ export interface HypothesisCrashEventData {
 /**
  * Inngest クライアント初期化
  * アプリケーションID: market-gap-validation
+ * - isDev: 開発環境およびテストキー環境下では署名検証401エラーをバイパスしてローカル接続を許可
  */
 export const inngest = new Inngest({
   id: "market-gap-validation",
   eventKey: env.INNGEST_EVENT_KEY,
+  isDev: process.env.NODE_ENV === "development" || env.INNGEST_SIGNING_KEY.startsWith("test-") || !env.INNGEST_SIGNING_KEY,
 });

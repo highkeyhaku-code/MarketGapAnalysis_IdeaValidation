@@ -81,9 +81,10 @@ export async function GET() {
   let supabaseCheck: HealthCheckItem;
   try {
     const startTime = Date.now();
+    // 正しいカラム名 canonical_name を使用 (または id のみ)
     const { data, error } = await supabaseAdmin
       .from("genres")
-      .select("id, name")
+      .select("id, canonical_name")
       .limit(1);
 
     const latencyMs = Date.now() - startTime;
