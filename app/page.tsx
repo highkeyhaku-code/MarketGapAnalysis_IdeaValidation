@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Compass,
   GitBranch,
@@ -40,6 +41,7 @@ const POPULAR_GENRES = [
 ];
 
 export default function GarageDashboard() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"discover" | "validate">("discover");
   const [selectedGenre, setSelectedGenre] = useState(POPULAR_GENRES[0].name);
   const [customKeyword, setCustomKeyword] = useState("");
@@ -307,10 +309,11 @@ export default function GarageDashboard() {
                 </div>
 
                 <button
-                  onClick={() => alert("Validation mode commit pipeline is connected. Ready for Phase 2 deep verification.")}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-purple-600/30 transition cursor-pointer"
+                  onClick={() => router.push("/validate")}
+                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center space-x-2"
                 >
-                  Create Commit & Run Hypothesis Crash Job
+                  <GitBranch className="w-4 h-4" />
+                  <span>Launch Full Idea Wizard & Run Reality Crash Engine</span>
                 </button>
               </div>
             </div>
