@@ -1,11 +1,34 @@
 import { inngest, AnalyzeMarketEventData } from "../client";
 import { supabaseAdmin } from "../../lib/supabaseClient";
+import { fetchProductHuntDetails, ProductHuntAppDetails } from "../../lib/api/producthunt";
+import { fetchFrictionCorpusFromTavily } from "../../lib/api/tavily";
+import { compressFrictionCorpus } from "../../lib/compressFrictionCorpus";
+import { evaluateMarketBatch, MarketEvaluationResult, CompanyMarketInput } from "../../lib/ai/evaluateMarket";
+import { Json } from "../../types/database";
 
 /**
- * 非同期ジョブ: 市場分析＆マップ構築 (analyzeMarketAndBuildMap)
+ * ジャンル名に基づいたシード候補企業名リストの取得
+ */
+function getSeedCompaniesForGenre(genreName: string): string[] {
+  const normalized = genreName.toLowerCase();
+  if (normalized.includes("project") || normalized.includes("task") || normalized.includes("management")) {
+    return ["Notion", "Linear", "Asana", "Monday.com", "ClickUp", "Trello"];
+  }
+  if (normalized.includes("crm") || normalized.includes("sales")) {
+    return ["HubSpot", "Salesforce", "Pipedrive", "Attio", "Folk", "Close"];
+  }
+  if (normalized.includes("dev") || normalized.includes("code") || normalized.includes("git")) {
+    return ["GitHub", "GitLab", "Linear", "Vercel", "Supabase", "Cursor"];
+  }
+  // デフォルト
+  return ["Notion", "Linear", "HubSpot", "Airtable", "Framer", "Loom"];
+}
+
+/**
+ * 非同期ジョブ: 市場分析＆重力マップ構築 (analyzeMarketAndBuildMap)
  * - 429レート制限対策: concurrency limit = 12
  * - 自動リトライ: retries = 3 (指数バックオフ)
- * - フェイルソフト機構: Promise.allSettledで取得企業数5社未満ならリトライエラーを送出
+ * - フェイルソフト機構: Promise.allSettledで取得企業数5社未満ならリトライキューへ回す
  * - job_status テーブルを逐次更新
  */
 export const analyzeMarketAndBuildMap = inngest.createFunction(
@@ -21,91 +44,111 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
   async ({ event, step }) => {
     const { jobId, genreId, genreName, userId } = event.data as AnalyzeMarketEventData;
 
-    // Step 1: ジョブ開始ステータスを更新 (10%)
+    // 3-1. 進捗の初期化: job_status を更新 (10%)
     await step.run("initialize-job-status", async () => {
       await supabaseAdmin.from("job_status").upsert({
         id: jobId,
         user_id: userId,
-        status: "fetching_market_sources",
+        status: "🔎 Product Huntから最新のプロダクトデータをフェッチ中...",
         percentage: 10,
         error_message: null,
       });
       return { status: "initialized" };
     });
 
-    // Step 2: 外部データソース（Tavily, ProductHunt, GitHub等）からの並列フェッチ (フェイルソフト機構)
-    const fetchedCompanies = await step.run("fetch-source-data-fail-soft", async () => {
-      await supabaseAdmin.from("job_status").update({
-        percentage: 35,
-        status: "querying_multi_sources",
-      }).eq("id", jobId);
+    // 3-2. データフェッチ: Task 1 の関数を使い、対象企業群のデータを取得 (Promise.allSettled フェイルソフト機構)
+    const rawFetchedData = await step.run("fetch-source-data-fail-soft", async () => {
+      const targetCompanies = getSeedCompaniesForGenre(genreName);
 
-      // TODO: 実際の外部API（ProductHunt, Tavily, GitHub）フェッチロジック
-      type SourceResult = { source: string; count: number; items: unknown[] };
-      const sources: Promise<SourceResult>[] = [
-        Promise.resolve({ source: "producthunt", count: 3, items: [] }),
-        Promise.resolve({ source: "tavily", count: 4, items: [] }),
-        Promise.resolve({ source: "github", count: 2, items: [] }),
-      ];
+      // 各企業のProduct HuntデータとTavily摩擦データを並列フェッチ
+      const fetchTasks = targetCompanies.map(async (companyName) => {
+        const [phDetails, tavilyResult] = await Promise.all([
+          fetchProductHuntDetails(companyName),
+          fetchFrictionCorpusFromTavily(companyName),
+        ]);
+        return {
+          appDetails: phDetails,
+          rawFriction: tavilyResult.rawFrictionCorpus,
+        };
+      });
 
-      const results = await Promise.allSettled(sources);
-      const successfulFetches = results.filter(
-        (r): r is PromiseFulfilledResult<SourceResult> => r.status === "fulfilled"
-      );
+      const settledResults = await Promise.allSettled(fetchTasks);
+      const successfulItems: Array<{ appDetails: ProductHuntAppDetails; rawFriction: string }> = [];
 
-      const totalRetrievedCount = successfulFetches.reduce((acc, curr) => acc + curr.value.count, 0);
+      for (const res of settledResults) {
+        if (res.status === "fulfilled") {
+          successfulItems.push(res.value);
+        }
+      }
 
-      // 取得企業数が5社未満の場合はエラーとしてリトライキューへ回す
-      if (totalRetrievedCount < 5) {
+      // 取得企業数が5社未満の場合はフェイルソフト機構によりリトライキューへ回す
+      if (successfulItems.length < 5) {
         throw new Error(
-          `Fail-soft trigger: Only ${totalRetrievedCount} companies retrieved (minimum 5 required). Moving to retry queue.`
+          `Fail-soft trigger: Only ${successfulItems.length} companies retrieved (minimum 5 required). Moving to retry queue.`
         );
       }
 
-      return {
-        totalRetrievedCount,
-        sourcesCount: successfulFetches.length,
-      };
+      return successfulItems;
     });
 
-    // Step 3: Borda Count集計 & 物理スコア計算 (70%)
-    await step.run("calculate-physical-scores-and-coordinates", async () => {
+    // 3-3. 進捗更新 & テキスト濃縮: job_status を更新 (40%)
+    const compressedInputs: CompanyMarketInput[] = await step.run("detect-and-compress-frictions", async () => {
       await supabaseAdmin.from("job_status").update({
-        percentage: 70,
-        status: "calculating_scores_and_coordinates",
+        percentage: 40,
+        status: "💀 ユーザーの「不満（摩擦）」を検知中...",
       }).eq("id", jobId);
 
-      // TODO: calculate_borda_top10 RPC呼び出し & LLMによる特徴量抽出
-      return { calculated: true };
+      // compressFrictionCorpus で摩擦キーワードを抽出し、上限3段落でテキストを濃縮
+      return rawFetchedData.map((item) => ({
+        appDetails: item.appDetails,
+        compressedFriction: compressFrictionCorpus(item.rawFriction, 3, 500),
+      }));
     });
 
-    // Step 4: market_cache 保存 & 完了通知 (100%)
+    // 3-4. AI分析とスコア計算: Task 2 の関数を呼び出し、評価データとD3用スカラー値を算出 (75%)
+    const marketEvaluation: MarketEvaluationResult = await step.run("ai-evaluation-and-gravity-scoring", async () => {
+      await supabaseAdmin.from("job_status").update({
+        percentage: 75,
+        status: "🧠 AIによる市場重力マップとJTBDの解析中...",
+      }).eq("id", jobId);
+
+      const evaluation = await evaluateMarketBatch(genreId, genreName, compressedInputs);
+      return evaluation;
+    });
+
+    // 3-5. キャッシュ保存と完了: D3.js用の構造（Materialized JSON）に整形し、market_cache へ Upsert。job_status を COMPLETED に更新 (100%)
     const finalResult = await step.run("save-market-cache-and-complete", async () => {
-      const mockMaterializedJson = {
-        genreId,
-        genreName,
-        generatedAt: new Date().toISOString(),
-        coordinates: [],
-        craters: [],
+      const materializedJson = {
+        genreId: marketEvaluation.genreId,
+        genreName: marketEvaluation.genreName,
+        coreJtbd: marketEvaluation.coreJtbd,
+        subJtbds: marketEvaluation.subJtbds,
+        companies: marketEvaluation.companies,
+        craters: marketEvaluation.craters,
+        generatedAt: marketEvaluation.evaluatedAt,
       };
 
-      // market_cache に Upsert
+      // market_cache テーブルへ Upsert
       await supabaseAdmin.from("market_cache").upsert({
         genre_id: genreId,
-        materialized_json: mockMaterializedJson,
+        materialized_json: materializedJson as unknown as Json,
         updated_at: new Date().toISOString(),
       });
 
-      // job_status を completed に更新
+      // job_status テーブルを COMPLETED に更新
       await supabaseAdmin.from("job_status").update({
         percentage: 100,
-        status: "completed",
-        result_data: mockMaterializedJson,
+        status: "COMPLETED",
+        result_data: materializedJson as unknown as Json,
       }).eq("id", jobId);
 
-      return { success: true, genreId };
+      return {
+        success: true,
+        genreId,
+        companiesCount: marketEvaluation.companies.length,
+      };
     });
 
-    return { jobId, result: finalResult, fetchedCompanies };
+    return { jobId, result: finalResult, marketEvaluation };
   }
 );
