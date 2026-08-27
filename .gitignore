@@ -2,3 +2,8 @@ PROJECT_CONTEXT.md
 環境構築.md
 
 .env.local
+.env*.local
+.env.*
+node_modules
+*.tsbuildinfo
+tsconfig.tsbuildinfo
