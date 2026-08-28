@@ -24,6 +24,7 @@ export const runHypothesisCrashJob = inngest.createFunction(
     triggers: [{ event: "hypothesis/crash.requested" }],
     concurrency: {
       limit: 10,
+      key: "event.data.userId",
     },
     retries: 3,
   },

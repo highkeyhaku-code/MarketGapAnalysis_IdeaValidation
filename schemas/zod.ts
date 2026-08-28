@@ -119,3 +119,36 @@ export const MarketInsightSchema = z.object({
   autopsy_report: z.union([z.string(), AutopsyReportSchema]).nullable(),
 });
 export type MarketInsight = z.infer<typeof MarketInsightSchema>;
+
+// ==============================================================================
+// 5. Pre-flight & What-If スキーマ (Zod Self-Correction 対象)
+// ==============================================================================
+
+export const PreviewSummarySchema = z.object({
+  coreJtbd: z.string().min(5),
+  targetDomainKeywords: z.array(z.string()).min(1),
+  primaryNemesis: z.string().min(2),
+  nemesisReason: z.string().min(5),
+  groundingConfidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+});
+export type PreviewSummaryType = z.infer<typeof PreviewSummarySchema>;
+
+export const WhatIfCardItemSchema = z.object({
+  id: z.string(),
+  patternType: z.enum(["constraint_destroyer", "assumption_collision", "unbundle_specialist", "shadow_rebel"]),
+  patternName: z.string(),
+  patternEmoji: z.string(),
+  provocativeQuestion: z.string(),
+  coreConcept: z.string(),
+  editorDraft: z.object({
+    q1_target_pain: z.string(),
+    q2_solution: z.string(),
+    q3_core_edge: z.string(),
+    q4_target_literacy: z.enum(["non_tech", "beginner", "intermediate", "tech_savvy", "developer", "expert"]),
+  }),
+});
+
+export const WhatIfResponseSchema = z.object({
+  cards: z.array(WhatIfCardItemSchema).min(1),
+});
+export type WhatIfResponseType = z.infer<typeof WhatIfResponseSchema>;

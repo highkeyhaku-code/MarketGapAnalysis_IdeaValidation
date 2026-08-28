@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callGemini } from "../../../../lib/ai/gemini";
+import { fetchWithZodSelfCorrection } from "../../../../lib/selfCorrection";
+import { WhatIfResponseSchema, WhatIfResponseType } from "../../../../schemas/zod";
 
 export interface WhatIfCard {
   id: string;
   patternType: "constraint_destroyer" | "assumption_collision" | "unbundle_specialist" | "shadow_rebel";
   patternName: string;
   patternEmoji: string;
-  provocativeQuestion: string; // 「もし、〜を破壊したら？」
-  coreConcept: string; // 創出されるビジネスアイデアの要約
+  provocativeQuestion: string;
+  coreConcept: string;
   editorDraft: {
     q1_target_pain: string;
     q2_solution: string;
     q3_core_edge: string;
-    q4_target_literacy: "beginner" | "intermediate" | "advanced";
+    q4_target_literacy: "non_tech" | "beginner" | "intermediate" | "tech_savvy" | "developer" | "expert";
   };
 }
 
@@ -31,6 +33,7 @@ export interface WhatIfResponse {
  * マップ描画時にはLLMを走らせず、ユーザーがクレーター／競合を選択して
  * 「ここでアイディアを生成」をクリックした瞬間に初めて Gemini を呼び出し、
  * 4つの What-If カードと 3ブロックエディタ用ドラフト JSON を生成する。
+ * 設計書 6.1: fetchWithZodSelfCorrection を適用。
  */
 export async function POST(req: NextRequest) {
   try {
@@ -125,78 +128,85 @@ export async function POST(req: NextRequest) {
 }
 `;
 
-    let generatedJson: any = null;
-    try {
-      const geminiRes = await callGemini(prompt, { responseMimeType: "application/json" });
-      generatedJson = JSON.parse(geminiRes);
-    } catch (llmErr) {
-      console.warn("[API /api/market/whatif] Gemini error, using fallback rules:", llmErr);
-      // フェイルソフトフォールバック生成
-      generatedJson = {
-        cards: [
-          {
-            id: "whatif-1",
-            patternType: "constraint_destroyer",
-            patternName: "制約破壊 (Constraint Destroyer)",
-            patternEmoji: "💥",
-            provocativeQuestion: `もし、${competitorName}の「設定や管理工数」という前提制約を完全に破壊したら？`,
-            coreConcept: `${genreName}における設定ゼロ・完全バックグラウンド自動同期ハブ`,
-            editorDraft: {
-              q1_target_pain: `${competitorName}の複雑な初期設定と手動メンテナンスに毎週膨大な時間を浪費している。`,
-              q2_solution: `AIが既存データを自動スキャンして0クリックで最適設定を自動構築する次世代${genreName}。`,
-              q3_core_edge: `設定学習コストが完全にゼロであり、既存の${competitorName}の重厚なUIを無力化する。`,
-              q4_target_literacy: "beginner",
-            },
-          },
-          {
-            id: "whatif-2",
-            patternType: "assumption_collision",
-            patternName: "常識衝突 (Assumption Collision)",
-            patternEmoji: "⚡",
-            provocativeQuestion: `もし、「ダッシュボードを見る」という常識を捨て、AIが勝手に意思決定したら？`,
-            coreConcept: `画面を見ない自律型${genreName}エージェント`,
-            editorDraft: {
-              q1_target_pain: `ダッシュボードを開いてデータを集計・確認する作業自体が形骸化し、意思決定が遅れる。`,
-              q2_solution: `Slackやチャット上で必要なアクションのみを自律的に提案・自動実行するAIワークフロー。`,
-              q3_core_edge: `UIを一切操作させないアンチダッシュボード設計による10倍の実行速度。`,
-              q4_target_literacy: "intermediate",
-            },
-          },
-          {
-            id: "whatif-3",
-            patternType: "unbundle_specialist",
-            patternName: "アンバンドル特化 (Unbundle Specialist)",
-            patternEmoji: "🎯",
-            provocativeQuestion: `もし、${competitorName}の${targetFeatureId}機能だけを切り出して極限まで研ぎ澄ましたら？`,
-            coreConcept: `${targetFeatureId}特化型の超軽量・即効ソリューション`,
-            editorDraft: {
-              q1_target_pain: `${competitorName}の機能が肥大化しすぎて、特定の${targetFeatureId}機能を使うためだけに高額なプランを強いられている。`,
-              q2_solution: `${targetFeatureId}の単一ワークフローに特化し、キーボードショートカットで秒速完結する専用ツール。`,
-              q3_core_edge: `10分の1の価格と10倍の軽快な操作レスポンス。`,
-              q4_target_literacy: "beginner",
-            },
-          },
-          {
-            id: "whatif-4",
-            patternType: "shadow_rebel",
-            patternName: "現場反逆・民主化 (Shadow Rebel)",
-            patternEmoji: "🏴‍☠️",
-            provocativeQuestion: `もし、全社導入を待たずに個人の現場担当者が勝手に使って勝てるツールにしたら？`,
-            coreConcept: `現場ボトムアップで広がるバイラル型${genreName}`,
-            editorDraft: {
-              q1_target_pain: `会社の公式ツールが使いにくく、現場の業務スピードが著しく低下している。`,
-              q2_solution: `個人アカウントで10秒で使い始められ、現場メンバー同士で自然拡散する草の根型プロダクト。`,
-              q3_core_edge: `ボトムアップPLGによるCACゼロの自然拡散ループ。`,
-              q4_target_literacy: "beginner",
-            },
-          },
-        ],
-      };
+    const validatedResult: WhatIfResponseType | null = await fetchWithZodSelfCorrection({
+      llmCaller: async (p) => callGemini(p, { responseMimeType: "application/json" }),
+      initialPrompt: prompt,
+      schema: WhatIfResponseSchema,
+      maxRetries: 3,
+    });
+
+    if (validatedResult && validatedResult.cards) {
+      return NextResponse.json({
+        success: true,
+        cards: validatedResult.cards,
+        targetCompetitor: competitorName,
+        targetFeature: targetFeatureId,
+      });
     }
+
+    // フォールバック生成
+    const fallbackCards: WhatIfCard[] = [
+      {
+        id: "whatif-1",
+        patternType: "constraint_destroyer",
+        patternName: "制約破壊 (Constraint Destroyer)",
+        patternEmoji: "💥",
+        provocativeQuestion: `もし、${competitorName}の「設定や管理工数」という前提制約を完全に破壊したら？`,
+        coreConcept: `${genreName}における設定ゼロ・完全バックグラウンド自動同期ハブ`,
+        editorDraft: {
+          q1_target_pain: `${competitorName}の複雑な初期設定と手動メンテナンスに毎週膨大な時間を浪費している。`,
+          q2_solution: `AIが既存データを自動スキャンして0クリックで最適設定を自動構築する次世代${genreName}。`,
+          q3_core_edge: `設定学習コストが完全にゼロであり、既存の${competitorName}の重厚なUIを無力化する。`,
+          q4_target_literacy: "beginner",
+        },
+      },
+      {
+        id: "whatif-2",
+        patternType: "assumption_collision",
+        patternName: "常識衝突 (Assumption Collision)",
+        patternEmoji: "⚡",
+        provocativeQuestion: `もし、「ダッシュボードを見る」という常識を捨て、AIが勝手に意思決定したら？`,
+        coreConcept: `画面を見ない自律型${genreName}エージェント`,
+        editorDraft: {
+          q1_target_pain: `ダッシュボードを開いてデータを集計・確認する作業自体が形骸化し、意思決定が遅れる。`,
+          q2_solution: `Slackやチャット上で必要なアクションのみを自律的に提案・自動実行するAIワークフロー。`,
+          q3_core_edge: `UIを一切操作させないアンチダッシュボード設計による10倍の実行速度。`,
+          q4_target_literacy: "intermediate",
+        },
+      },
+      {
+        id: "whatif-3",
+        patternType: "unbundle_specialist",
+        patternName: "アンバンドル特化 (Unbundle Specialist)",
+        patternEmoji: "🎯",
+        provocativeQuestion: `もし、${competitorName}の${targetFeatureId}機能だけを切り出して極限まで研ぎ澄ましたら？`,
+        coreConcept: `${targetFeatureId}特化型の超軽量・即効ソリューション`,
+        editorDraft: {
+          q1_target_pain: `${competitorName}の機能が肥大化しすぎて、特定の${targetFeatureId}機能を使うためだけに高額なプランを強いられている。`,
+          q2_solution: `${targetFeatureId}の単一ワークフローに特化し、キーボードショートカットで秒速完結する専用ツール。`,
+          q3_core_edge: `10分の1の価格と10倍の軽快な操作レスポンス。`,
+          q4_target_literacy: "beginner",
+        },
+      },
+      {
+        id: "whatif-4",
+        patternType: "shadow_rebel",
+        patternName: "現場反逆・民主化 (Shadow Rebel)",
+        patternEmoji: "🏴‍☠️",
+        provocativeQuestion: `もし、全社導入を待たずに個人の現場担当者が勝手に使って勝てるツールにしたら？`,
+        coreConcept: `現場ボトムアップで広がるバイラル型${genreName}`,
+        editorDraft: {
+          q1_target_pain: `会社の公式ツールが使いにくく、現場の業務スピードが著しく低下している。`,
+          q2_solution: `個人アカウントで10秒で使い始められ、現場メンバー同士で自然拡散する草の根型プロダクト。`,
+          q3_core_edge: `ボトムアップPLGによるCACゼロの自然拡散ループ。`,
+          q4_target_literacy: "beginner",
+        },
+      },
+    ];
 
     return NextResponse.json({
       success: true,
-      cards: generatedJson.cards || [],
+      cards: fallbackCards,
       targetCompetitor: competitorName,
       targetFeature: targetFeatureId,
     });

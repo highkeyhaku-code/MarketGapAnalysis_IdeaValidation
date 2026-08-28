@@ -22,7 +22,8 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
     name: "Analyze Market and Build Gap Map",
     triggers: [{ event: "market/analyze.requested" }],
     concurrency: {
-      limit: 12,
+      limit: 15,
+      key: "event.data.userId",
     },
     retries: 3,
   },
