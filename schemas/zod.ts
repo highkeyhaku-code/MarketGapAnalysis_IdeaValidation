@@ -117,6 +117,7 @@ export const MarketInsightSchema = z.object({
   needs_web_search: z.boolean(),
   negative_bias_applied: z.boolean(),
   autopsy_report: z.union([z.string(), AutopsyReportSchema]).nullable(),
+  score_reasoning: z.string().optional(),
 });
 export type MarketInsight = z.infer<typeof MarketInsightSchema>;
 

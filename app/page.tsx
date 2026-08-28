@@ -170,30 +170,8 @@ export default function GarageDashboard() {
                   市場の<span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">「見えない穴（Gap）」</span>を暴く
                 </h1>
                 <p className="text-slate-400 text-sm leading-relaxed">
-                  Product Huntのプロダクト群とフォーラムの摩擦（Friction）をGeminiが多角的に分析。D3.js物理演算トポロジー上に、競合の引力と反発力のクレーターを描画します。
+                  Product Huntのプロダクト群とフォーラムの摩擦（Friction）をGeminiが多角的に分析。以下の市場ジャンル辞書（Serendipity Seeker）から関心のある市場を選択して重力トポロジーを描画してください。
                 </p>
-              </div>
-
-              {/* クイック検索バー */}
-              <div className="mt-6 flex flex-col sm:flex-row gap-3 max-w-2xl">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-500" />
-                  <input
-                    type="text"
-                    value={customKeyword}
-                    onChange={(e) => setCustomKeyword(e.target.value)}
-                    placeholder="調べたいSaaS領域・市場キーワードを入力（例: AI Video Editor, CRM）"
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
-                  />
-                </div>
-                <button
-                  disabled={isTriggering}
-                  onClick={() => handleStartDiscovery(customKeyword || selectedGenre)}
-                  className="inline-flex items-center justify-center space-x-2 px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition cursor-pointer"
-                >
-                  <Rocket className="w-4 h-4" />
-                  <span>{isTriggering ? "起動中..." : "Run Discovery"}</span>
-                </button>
               </div>
             </div>
 

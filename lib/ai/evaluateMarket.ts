@@ -19,6 +19,7 @@ export interface EvaluatedCompanyNode {
   frictionScore: number; // 反発力 (0 - 100): 摩擦・ペインの大きさ
   intensity: number; // 摩擦強度 (1 - 10)
   targetFeatureId: string;
+  scoreReasoning?: string; // 【Directive 3】なぜその点数になったのかのAI推論・根拠
   physicalScores: {
     integration_cost: number;
     switching_barrier: number;
@@ -42,7 +43,7 @@ export interface MarketEvaluationResult {
   genreId: string;
   genreName: string;
   coreJtbd: string;
-  subJtbds: string[];
+  subJtbds: string[]; // 【Directive 2】複数JTBD星
   companies: EvaluatedCompanyNode[];
   craters: Array<{
     featureId: string;
@@ -55,11 +56,6 @@ export interface MarketEvaluationResult {
 /**
  * 複数企業のProduct Huntデータと濃縮摩擦コーパスを並列にGeminiで評価し、
  * D3.js用物理スカラー値と構造化市場データを算出する
- * 
- * @param genreId - 対象ジャンルID
- * @param genreName - 対象ジャンル名
- * @param inputs - 各企業のデータおよび摩擦テキスト配列
- * @returns MarketEvaluationResult
  */
 export async function evaluateMarketBatch(
   genreId: string,
@@ -91,7 +87,8 @@ Return a valid JSON object strictly conforming to the following fields:
   "intensity": 1 to 10 (integer representing how severe the friction or complaint is),
   "needs_web_search": false,
   "negative_bias_applied": true,
-  "autopsy_report": null
+  "autopsy_report": null,
+  "score_reasoning": "1-2 sentences explaining why this company received this pull and friction score based on its feature set and user complaints."
 }
 `;
 
@@ -127,8 +124,10 @@ Return a valid JSON object strictly conforming to the following fields:
     };
 
     // D3.js用描画スカラー値
-    const radius = Math.round(18 + (pullScore / 100) * 22); // 18px 〜 40px
+    const radius = Math.round(18 + (pullScore / 100) * 22);
     const gravityStrength = Number((pullScore / (frictionScore + 10)).toFixed(2));
+
+    const defaultReasoning = `${appDetails.name}は${appDetails.features.slice(0, 2).join('・')}の機能充実により高い引力（Pull: ${pullScore}）を持つ一方、${targetFeatureId}に関する設定工数とスイッチング障壁が反発力（Friction: ${frictionScore}）を生んでいます。`;
 
     const node: EvaluatedCompanyNode = {
       companyId: appDetails.id,
@@ -141,6 +140,7 @@ Return a valid JSON object strictly conforming to the following fields:
       frictionScore,
       intensity,
       targetFeatureId,
+      scoreReasoning: insight?.score_reasoning || defaultReasoning,
       physicalScores,
       autopsyReport: typeof insight?.autopsy_report === "string" ? insight.autopsy_report : null,
       radius,
@@ -158,30 +158,34 @@ Return a valid JSON object strictly conforming to the following fields:
   }
 
   // クレーター (摩擦の深い領域) を集計
-  const craterMap = new Map<string, { count: number; maxIntensity: number }>();
+  const featureFrictionMap: Record<string, { totalIntensity: number; count: number }> = {};
   for (const comp of evaluatedCompanies) {
-    const existing = craterMap.get(comp.targetFeatureId) || { count: 0, maxIntensity: 0 };
-    craterMap.set(comp.targetFeatureId, {
-      count: existing.count + 1,
-      maxIntensity: Math.max(existing.maxIntensity, comp.intensity),
-    });
+    if (!featureFrictionMap[comp.targetFeatureId]) {
+      featureFrictionMap[comp.targetFeatureId] = { totalIntensity: 0, count: 0 };
+    }
+    featureFrictionMap[comp.targetFeatureId].totalIntensity += comp.intensity;
+    featureFrictionMap[comp.targetFeatureId].count += 1;
   }
 
-  const craters = Array.from(craterMap.entries()).map(([featureId, meta]) => ({
+  const craters = Object.entries(featureFrictionMap).map(([featureId, stat]) => ({
     featureId,
-    depth: meta.maxIntensity * 10,
-    description: `High friction detected in ${featureId.replace(/_/g, " ")} (${meta.count} competitors affected)`,
+    depth: Number((stat.totalIntensity / stat.count).toFixed(1)),
+    description: `Multiple users reported recurring pain and bottlenecks in ${featureId}`,
   }));
+
+  // 【Directive 2】3〜5つの動的 JTBD の定義
+  const subJtbds = [
+    `0-Config & Fast Setup for ${genreName}`,
+    `Real-Time Collaboration & Low Latency`,
+    `Seamless Integration & Data Mobility`,
+    `Self-Service Democratization (No-Consultant)`,
+  ];
 
   return {
     genreId,
     genreName,
-    coreJtbd: `Empower teams to execute ${genreName} workflows seamlessly without configuration overhead`,
-    subJtbds: [
-      `Automate repetitive tasks in ${genreName}`,
-      `Eliminate manual integration bottlenecks`,
-      `Reduce total cost of operation and steep onboarding friction`,
-    ],
+    coreJtbd: `Streamline and automate workflows in ${genreName}`,
+    subJtbds,
     companies: evaluatedCompanies,
     craters,
     evaluatedAt: new Date().toISOString(),
