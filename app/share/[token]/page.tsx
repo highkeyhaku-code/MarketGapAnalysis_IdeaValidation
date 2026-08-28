@@ -13,10 +13,20 @@ import {
   ExternalLink,
   CheckCircle2,
   Lock,
+  Star,
+  Lightbulb,
+  HelpCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { EmotionalNutritionLabel } from "../../../components/EmotionalNutritionLabel";
 import { VSCardBoard } from "../../../components/VSCardBoard";
 
+/**
+ * 4.2 & 6.4 投資家・ステークホルダー向け読み取り専用ダッシュボード (InvestorSharePage)
+ * - 編集UI（ウィザード、サイドバー、設定等）を完全排除した純粋なレポートビュー
+ * - 5.1 AIの不確実性の完全開示 (Transparency Metric: Grounding Confidence)
+ * - 5.2 対話型ツッコミUI (Socratic Dialogue Challenge)
+ */
 export default function InvestorSharePage() {
   const params = useParams();
   const token = params?.token as string;
@@ -91,7 +101,7 @@ export default function InvestorSharePage() {
                   STARTUP DUE DILIGENCE AUDIT REPORT
                 </span>
                 <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 rounded-md">
-                  VERIFIED
+                  VERIFIED READ-ONLY
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-mono">
@@ -169,6 +179,23 @@ export default function InvestorSharePage() {
               <p className="text-xs text-slate-400">
                 過去に類似ソリューションで放棄・アーカイブされたリポジトリ群の失敗要因を照合し、耐障害性を検証しています。
               </p>
+
+              {report.autopsyHighlights && report.autopsyHighlights.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                  {report.autopsyHighlights.map((item: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-indigo-300 truncate">{item.name}</span>
+                        <span className="font-mono text-[10px] text-amber-400">★ {item.stars}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 line-clamp-2">{item.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -177,38 +204,85 @@ export default function InvestorSharePage() {
           </div>
         </div>
 
-        {/* 審査員フィードバック */}
+        {/* 審査員フィードバック & 不確実性開示 & ソクラテス式問いかけ */}
         <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <UserCheck className="w-5 h-5 text-indigo-400" />
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">
-              Independent Advisory Evaluation (3視点からの客観審査)
-            </h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <UserCheck className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">
+                Independent Advisory Evaluation (3視点からの客観審査)
+              </h3>
+            </div>
+            <span className="text-xs text-slate-400 flex items-center space-x-1 font-mono">
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Grounding Transparency Metric Active</span>
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {personas.map((p: any, idx: number) => (
               <div
                 key={idx}
-                className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl space-y-3 shadow-xl"
+                className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl space-y-4 shadow-xl flex flex-col justify-between"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-100">{p.name}</h4>
-                    <p className="text-[11px] text-slate-400">{p.title}</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-100">{p.name}</h4>
+                      <p className="text-[11px] text-slate-400">{p.title}</p>
+                    </div>
+                    <span
+                      className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border uppercase ${
+                        p.verdict === "CRITICAL"
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                          : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                      }`}
+                    >
+                      {p.verdict}
+                    </span>
                   </div>
-                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-slate-950 rounded-md border border-slate-800 uppercase text-slate-300">
-                    {p.verdict}
-                  </span>
+
+                  {/* 5.1 不確実性の開示 (Transparency Metric) */}
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950 rounded-xl border border-slate-800 text-[10px] font-mono">
+                    <span className="text-slate-400">Grounding Confidence:</span>
+                    <div className="flex items-center space-x-1 text-amber-400">
+                      <Star className="w-3 h-3 fill-amber-400" />
+                      <span>{p.groundingConfidence || "HIGH"} ({p.groundingSourcesCount || 5} sources)</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-300 italic leading-relaxed">
+                    "{p.coreCritique}"
+                  </p>
+
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs space-y-1">
+                    <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
+                      Fatal Vulnerability
+                    </span>
+                    <p className="text-[11px] text-rose-200">{p.fatalFlaw}</p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-300 italic leading-relaxed">
-                  "{p.coreCritique}"
-                </p>
-                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
-                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
-                    Strategic Countermeasure
-                  </span>
-                  <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
+
+                <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                  <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
+                      Strategic Countermeasure
+                    </span>
+                    <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
+                  </div>
+
+                  {/* 5.2 ソクラテス式の対話型問いかけ */}
+                  {p.socraticQuestion && (
+                    <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-xs space-y-1 animate-in fade-in">
+                      <div className="flex items-center space-x-1.5 text-purple-300 font-bold text-[10px] uppercase tracking-wider">
+                        <Lightbulb className="w-3.5 h-3.5 text-purple-400" />
+                        <span>Socratic Challenge (思考の足場)</span>
+                      </div>
+                      <p className="text-[11px] text-purple-200 italic">
+                        "{p.socraticQuestion}"
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
