@@ -177,6 +177,13 @@ export default function ValidationResultPage() {
     targetFeatureId,
     intensity,
     gravityStrength: pullScore / 100,
+    pullScores: {
+      "jtbd-star-0": pullScore,
+      "jtbd-star-1": Math.max(20, pullScore - 15),
+      "jtbd-star-2": Math.min(95, pullScore + 10),
+      "jtbd-star-3": pullScore,
+    },
+    scoreReasoning: `${name} provides key capabilities with a pull score of ${pullScore} and friction of ${frictionScore}.`,
     physicalScores: {
       integration_cost: 0,
       switching_barrier: 0,

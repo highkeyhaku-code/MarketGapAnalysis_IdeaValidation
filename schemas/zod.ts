@@ -1,85 +1,113 @@
 import { z } from "zod";
 
 // ==============================================================================
-// 1. レイヤー 1: 思考引き出しウィザード (IdeaWizard) 入力スキーマ
+// 1. 物理要素 & ドメイン 定義
 // ==============================================================================
 
+export const PhysicalElementEnum = z.enum([
+  "integration_cost",
+  "switching_barrier",
+  "learning_curve",
+  "security_compliance",
+  "customizability",
+  "realtime_performance",
+  "price_sensitivity",
+  "ui_simplicity",
+  "network_effect",
+]);
+export type PhysicalElement = z.infer<typeof PhysicalElementEnum>;
+
+export const DomainTypeEnum = z.enum([
+  "B2B_ENTERPRISE",
+  "B2B_SME",
+  "B2C_CONSUMER",
+]);
+export type DomainType = z.infer<typeof DomainTypeEnum>;
+
+// ==============================================================================
+// 2. 初期辞書生成スキーマ
+// ==============================================================================
+
+export const GenreDictionaryItemSchema = z.object({
+  genre_id: z.string().uuid({ message: "genre_id must be a valid UUID" }),
+  canonical_name: z.string().min(1, { message: "canonical_name is required" }),
+  aliases: z.array(z.string()).min(1, { message: "aliases must contain at least one alias" }),
+  description: z.string().min(1, { message: "description is required" }),
+});
+export type GenreDictionaryItem = z.infer<typeof GenreDictionaryItemSchema>;
+
+export const GenreDictionarySchema = z.array(GenreDictionaryItemSchema);
+export type GenreDictionary = z.infer<typeof GenreDictionarySchema>;
+
+// ==============================================================================
+// 3. IdeaInputSchema (入力バリデーション)
+// ==============================================================================
+
+export const TargetLiteracyEnum = z.enum([
+  "non_tech",
+  "tech_savvy",
+  "developer",
+  "beginner",
+  "intermediate",
+  "expert",
+]);
+export type TargetLiteracy = z.infer<typeof TargetLiteracyEnum>;
+
+export const MonetizationModelEnum = z.enum([
+  "subscription",
+  "freemium",
+  "usage_based",
+  "one_time",
+  "marketplace_take_rate",
+]);
+export type MonetizationModel = z.infer<typeof MonetizationModelEnum>;
+
 export const IdeaInputSchema = z.object({
-  // Q1: ターゲットが夜も眠れないほど恐れている「最悪の事態・激痛」 (30文字以上)
   q1_target_pain: z
     .string()
-    .min(30, { message: "Q1は30文字以上で、ターゲットの切実な痛み・恐怖を具体的に記述してください" })
-    .max(1000, { message: "Q1は1000文字以内で記述してください" }),
-
-  // Q2: 競合が「技術的/構造的に真似できない」と確信できる理由 (30文字以上)
+    .min(30, { message: "Target pain (Q1) must be between 30 and 1000 characters" })
+    .max(1000, { message: "Target pain (Q1) must be between 30 and 1000 characters" }),
   q2_solution: z
     .string()
-    .min(30, { message: "Q2は30文字以上で、競合が構造的に模倣できない理由を記述してください" })
-    .max(1000, { message: "Q2は1000文字以内で記述してください" }),
-
-  // Q3: コアとなる優位性の源泉（AIが物理要素として自動判定）
+    .min(30, { message: "Solution (Q2) must be between 30 and 1000 characters" })
+    .max(1000, { message: "Solution (Q2) must be between 30 and 1000 characters" }),
   q3_core_edge: z
     .string()
-    .min(10, { message: "Q3は10文字以上で、コアとなる物理的優位性を記述してください" })
-    .max(500, { message: "Q3は500文字以内で記述してください" }),
-
-  // Q4: ターゲット層のITリテラシー / 組織導入の障壁 (Smart Defaults による自動設定可)
-  q4_target_literacy: z
-    .string()
-    .min(5, { message: "Q4は5文字以上で記述してください" })
-    .max(300, { message: "Q4は300文字以内で記述してください" }),
-
-  // タイムトラベル・ピボット用の親コミットID（nullの場合はルートコミット）
+    .min(10, { message: "Core edge (Q3) must be between 10 and 1000 characters" })
+    .max(1000, { message: "Core edge (Q3) must be between 10 and 1000 characters" }),
+  q4_target_literacy: TargetLiteracyEnum,
+  q4_monetization_model: MonetizationModelEnum.default("subscription"),
+  q4_supplementary_pains: z.array(z.string()).default([]),
   parent_commit_id: z.string().uuid().nullable().optional(),
-
-  // ドメイン識別子
-  domain: z.enum(["B2B_ENTERPRISE", "B2B_SME", "B2C_CONSUMER"]).default("B2B_SME"),
+  domain: DomainTypeEnum.default("B2B_SME"),
 });
-
 export type IdeaInput = z.infer<typeof IdeaInputSchema>;
 
 // ==============================================================================
-// 2. レイヤー 2: 懐疑的審査員フィードバック & ソクラテス式問いかけスキーマ
+// 4. LLM出力スキーマ
 // ==============================================================================
 
-export const PersonaFeedbackSchema = z.object({
-  persona: z.enum([
-    "cynical_vc",        // 疑り深いシードVC
-    "lazy_buyer",        // 面倒くさがりな現場バイヤー
-    "complaining_user",  // 愚痴の多いヘビーユーザー
-  ]),
-  brutal_critique: z.string().min(10, { message: "手厳しい批判は10文字以上必要です" }),
-  killer_question: z.string().min(10, { message: "ソクラテス式の問いは10文字以上必要です" }),
-  fail_probability_score: z.number().int().min(0).max(100), // 失敗確率 (0 - 100)
+/**
+ * Q3分類用スキーマ
+ */
+export const Q3ClassificationSchema = z.object({
+  detected_elements: z
+    .array(PhysicalElementEnum)
+    .max(3, { message: "Maximum of 3 detected elements allowed" }),
+  reasoning: z.string().min(1, { message: "Reasoning is required" }),
 });
+export type Q3Classification = z.infer<typeof Q3ClassificationSchema>;
 
-export type PersonaFeedback = z.infer<typeof PersonaFeedbackSchema>;
-
-// ==============================================================================
-// 3. レイヤー 3: 死骸検索 (GitHub Autopsy) 照合スキーマ
-// ==============================================================================
-
-export const DeadRepoAutopsySchema = z.object({
-  repo_name: z.string(),
-  repo_url: z.string().url(),
-  abandoned_year: z.number().int(),
-  stars: z.number().int(),
-  death_cause: z.string().min(10, { message: "死因の要約は10文字以上必要です" }),
-  similarity_score: z.number().min(0).max(1), // 類似度 (0.0 - 1.0)
-});
-
+/**
+ * Step 1 抽出用 (MarketInsightSchema)
+ */
 export const AutopsyReportSchema = z.object({
-  matched_dead_repos: z.array(DeadRepoAutopsySchema),
-  overall_autopsy_summary: z.string().min(10),
-  historical_failure_pattern: z.string(),
-});
-
-export type DeadRepoAutopsy = z.infer<typeof DeadRepoAutopsySchema>;
+  failed_project_name: z.string().optional().default(""),
+  github_repo_url: z.string().url().optional().or(z.literal("")),
+  post_mortem_summary: z.string().optional().default(""),
+  key_failure_reasons: z.array(z.string()).optional().default([]),
+}).nullable();
 export type AutopsyReport = z.infer<typeof AutopsyReportSchema>;
-
-// ==============================================================================
-// 4. レイヤー 4: 摩擦・重力インサイトスキーマ (Zod Self-Correction 対象)
-// ==============================================================================
 
 export const MarketInsightSchema = z
   .object({
@@ -119,8 +147,29 @@ export type MarketInsight = z.infer<typeof MarketInsightSchema>;
 export const PreviewSummarySchema = z.object({
   coreJtbd: z.string().min(5),
   targetDomainKeywords: z.array(z.string()).min(1),
-  primaryBottleneckAssumption: z.string().min(5),
-  estimatedMarketDepth: z.enum(["shallow", "moderate", "deep"]),
+  primaryNemesis: z.string().min(2),
+  nemesisReason: z.string().min(5),
+  groundingConfidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+});
+export type PreviewSummaryType = z.infer<typeof PreviewSummarySchema>;
+export type PreviewSummary = PreviewSummaryType;
+
+export const WhatIfCardItemSchema = z.object({
+  id: z.string(),
+  patternType: z.enum(["constraint_destroyer", "assumption_collision", "unbundle_specialist", "shadow_rebel"]),
+  patternName: z.string(),
+  patternEmoji: z.string(),
+  provocativeQuestion: z.string(),
+  coreConcept: z.string(),
+  editorDraft: z.object({
+    q1_target_pain: z.string(),
+    q2_solution: z.string(),
+    q3_core_edge: z.string(),
+    q4_target_literacy: z.enum(["non_tech", "beginner", "intermediate", "tech_savvy", "developer", "expert"]),
+  }),
 });
 
-export type PreviewSummary = z.infer<typeof PreviewSummarySchema>;
+export const WhatIfResponseSchema = z.object({
+  cards: z.array(WhatIfCardItemSchema).min(1),
+});
+export type WhatIfResponseType = z.infer<typeof WhatIfResponseSchema>;
