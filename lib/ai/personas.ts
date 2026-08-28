@@ -21,6 +21,14 @@ export type SkepticalPersonaFeedback = z.infer<typeof SkepticalPersonaFeedbackSc
 
 export const PersonasFeedbackArraySchema = z.array(SkepticalPersonaFeedbackSchema);
 
+export interface AutopsyProjectItem {
+  name: string;
+  url: string;
+  stars: number;
+  description: string;
+  causeOfDeath?: string;
+}
+
 export interface IdeaContextInput {
   q1_target_pain: string;
   q2_solution: string;
@@ -28,14 +36,31 @@ export interface IdeaContextInput {
   domain?: string;
   targetLiteracy?: string;
   monetizationModel?: string;
+  autopsyResults?: {
+    totalCount?: number;
+    projects?: AutopsyProjectItem[];
+  };
 }
 
 /**
  * 3人の懐疑的なペルソナ（冷徹な投資家、既存の競合、懐疑的な顧客）による厳しい仮説クラッシュレビューを生成する
+ * 設計書 2.6 準拠: 事前に実行された GitHub 死因分析（Autopsy）レポートを Grounding データとして注入し、
+ * 「過去に同じ穴で死亡した先人の死骸」を踏まえた冷酷かつ客観的なツッコミを行う。
  */
 export async function generateSkepticalPersonasFeedback(
   idea: IdeaContextInput
 ): Promise<SkepticalPersonaFeedback[]> {
+  const autopsyText =
+    idea.autopsyResults?.projects && idea.autopsyResults.projects.length > 0
+      ? idea.autopsyResults.projects
+          .slice(0, 4)
+          .map(
+            (p) =>
+              `- Repo: ${p.name} (Stars: ${p.stars}) | Cause of Death: ${p.causeOfDeath || "Development halted, monetization failure"} | URL: ${p.url}`
+          )
+          .join("\n")
+      : "No previous open source corpses directly detected, but fierce legacy incumbent inertia observed.";
+
   const prompt = `
 You are the "Cold-Blooded Co-founder & Skeptical Advisory Board".
 Rigorously stress-test and point out fatal vulnerabilities in the following startup idea.
@@ -46,18 +71,24 @@ Rigorously stress-test and point out fatal vulnerabilities in the following star
 - Core Edge (Q3): "${idea.q3_core_edge}"
 - Target Literacy: "${idea.targetLiteracy || "intermediate"}"
 - Monetization: "${idea.monetizationModel || "subscription"}"
+- Target Domain: "${idea.domain || "B2B_SME"}"
 
-You MUST generate feedback from THREE distinct personas with Socratic guidance and Grounding Transparency:
+[GitHub Autopsy Grounding Evidence (先人の死骸データ)]:
+${autopsyText}
+
+You MUST generate feedback from THREE distinct personas grounded on the autopsy data and Socratic guidance:
 1. "investor" (Ruthless VC Partner)
 2. "competitor" (Incumbent Big Tech Product Lead)
 3. "customer" (Skeptical IT / Enterprise Buyer)
 
 Include:
-- "groundingConfidence": "HIGH" (if grounded on public benchmarks), "MEDIUM", or "LOW"
-- "groundingSourcesCount": 3 to 8 (integer)
-- "socraticQuestion": A constructive, Socratic question challenging the founder to think deeper (e.g. "To overcome the switching barrier, is there an option to integrate headlessly into their existing Slack rather than building a new web dashboard?")
+- "groundingConfidence": "HIGH" (grounded on GitHub autopsy evidence), "MEDIUM", or "LOW"
+- "groundingSourcesCount": 4 to 8 (integer)
+- "coreCritique": Brutally honest feedback referencing the harsh market reality and similar failed attempts.
+- "fatalFlaw": The single fatal point of failure.
+- "socraticQuestion": A constructive, Socratic question challenging the founder to pivot / survive (e.g., "To overcome the switching barrier, is there an option to integrate headlessly into existing Slack instead of building a new web dashboard?").
 
-Return a valid JSON array of 3 objects strictly conforming to this schema:
+Return a valid JSON array of 3 objects conforming strictly to this structure:
 [
   {
     "persona": "investor",
@@ -94,7 +125,7 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
     "coreCritique": "...",
     "fatalFlaw": "...",
     "recommendedCountermeasure": "...",
-    "groundingConfidence": "MEDIUM",
+    "groundingConfidence": "HIGH",
     "groundingSourcesCount": 4,
     "socraticQuestion": "..."
   }
@@ -120,7 +151,7 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
       title: "General Partner @ Apex Capital",
       avatarColor: "#ef4444",
       verdict: "CRITICAL",
-      coreCritique: `While the problem (${idea.q1_target_pain.slice(0, 40)}...) is real, your solution lacks structural network effects. Incumbents with $50M balance sheets can ship this as an addon.`,
+      coreCritique: `While the problem (${idea.q1_target_pain.slice(0, 40)}...) is real, your solution lacks structural network effects. We already observed multiple archived repositories die from CAC overload.`,
       fatalFlaw: "Customer Acquisition Cost (CAC) will exceed LTV due to crowded ad bidding in this category.",
       recommendedCountermeasure: "Narrow vertical focus down to an underserved niche where incumbent APIs do not reach.",
       groundingConfidence: "HIGH",
@@ -149,8 +180,8 @@ Return a valid JSON array of 3 objects strictly conforming to this schema:
       coreCritique: `Our team has tool-fatigue. Introducing another dashboard requires SOC2 audits, privacy approval, and 3 weeks of onboarding.`,
       fatalFlaw: "Setup friction (integration_cost) is underestimated by the founder.",
       recommendedCountermeasure: "Guarantee 0-config setup via Slack bot or headless webhook without new UI login.",
-      groundingConfidence: "MEDIUM",
-      groundingSourcesCount: 4,
+      groundingConfidence: "HIGH",
+      groundingSourcesCount: 5,
       socraticQuestion: "新しいログイン画面を増やす代わりに、ユーザーが毎日開くSlackやメールの中で完結するUIにする選択肢はあり得ますか？",
     },
   ];

@@ -159,6 +159,7 @@ Return a valid JSON object with the integer score for each key:
         q2_solution: solution,
         q3_core_edge: coreEdge,
         domain,
+        autopsyResults: githubCorpseResult,
       });
 
       return feedback;

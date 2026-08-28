@@ -13,15 +13,20 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  Lightbulb,
+  ArrowRight,
+  Check,
 } from "lucide-react";
 import { IdeaWizard } from "../../components/IdeaWizard";
 import { JobPollingTracker } from "../../components/JobPollingTracker";
 import { IdeaInput, PhysicalElement } from "../../schemas/zod";
+import { PivotSuggestionResponse } from "../api/ideas/pivot-suggestion/route";
 
 function ValidateContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pivotFrom = searchParams.get("pivotFrom");
+  const targetCraterParam = searchParams.get("targetCrater") || "未充足の深い摩擦領域";
   const targetPainQuery = searchParams.get("targetPain");
   const solutionQuery = searchParams.get("solution");
   const coreEdgeQuery = searchParams.get("coreEdge");
@@ -30,6 +35,8 @@ function ValidateContent() {
   const [loadingInitial, setLoadingInitial] = useState(Boolean(pivotFrom));
   const [initialValues, setInitialValues] = useState<Partial<IdeaInput> | undefined>(undefined);
   const [pivotCommitMeta, setPivotCommitMeta] = useState<any>(null);
+  const [pivotSuggestion, setPivotSuggestion] = useState<PivotSuggestionResponse | null>(null);
+  const [isApplyingDiff, setIsApplyingDiff] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [createdCommitId, setCreatedCommitId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -49,11 +56,11 @@ function ValidateContent() {
     }
   }, [pivotFrom, targetPainQuery, solutionQuery, coreEdgeQuery, targetLiteracyQuery]);
 
-  // Time-Travel: 過去のコミットから状態を復元
+  // Time-Travel: 過去のコミットから状態を復元 & ピボット提案を生成 (設計書 3.3)
   useEffect(() => {
     if (!pivotFrom) return;
 
-    const fetchPivotSource = async () => {
+    const fetchPivotSourceAndSuggestion = async () => {
       try {
         setLoadingInitial(true);
         const res = await fetch(`/api/ideas/commit/${pivotFrom}`);
@@ -61,14 +68,33 @@ function ValidateContent() {
         if (json.success && json.commit) {
           const c = json.commit;
           setPivotCommitMeta(c);
-          setInitialValues({
+          const restoredValues: Partial<IdeaInput> = {
             q1_target_pain: c.q1_target_pain || "",
             q2_solution: c.q2_solution || "",
             q3_core_edge: c.q3_core_edge || "",
             q4_target_literacy: c.q4_target_literacy || "intermediate",
             q4_monetization_model: c.q4_monetization_model || "subscription",
             q4_supplementary_pains: c.q4_supplementary_pains || [],
-          });
+          };
+          setInitialValues(restoredValues);
+
+          // 3.3 LLM自動生成のピボット提案 (Diffハイライト) を取得
+          try {
+            const sugRes = await fetch("/api/ideas/pivot-suggestion", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                parentCommit: c,
+                targetCrater: targetCraterParam,
+              }),
+            });
+            const sugJson = await sugRes.json();
+            if (sugJson.success) {
+              setPivotSuggestion(sugJson);
+            }
+          } catch (sugErr) {
+            console.warn("Failed to fetch pivot suggestion:", sugErr);
+          }
         }
       } catch (err) {
         console.error("Failed to restore pivot commit:", err);
@@ -77,8 +103,20 @@ function ValidateContent() {
       }
     };
 
-    fetchPivotSource();
-  }, [pivotFrom]);
+    fetchPivotSourceAndSuggestion();
+  }, [pivotFrom, targetCraterParam]);
+
+  // ピボット案の適用ハンドラ
+  const handleApplyPivotDiff = () => {
+    if (!pivotSuggestion) return;
+    setIsApplyingDiff(true);
+    setInitialValues((prev) => ({
+      ...prev,
+      q1_target_pain: pivotSuggestion.suggestedQ1,
+      q3_core_edge: pivotSuggestion.suggestedQ3,
+    }));
+    setTimeout(() => setIsApplyingDiff(false), 500);
+  };
 
   // ウィザード送信ハンドラ
   const handleWizardSubmit = async (
@@ -179,6 +217,57 @@ function ValidateContent() {
           </p>
         </div>
 
+        {/* 3.3 ピボット提案バナー (Diffハイライト表示) */}
+        {pivotSuggestion && (
+          <div className="p-6 bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-purple-950/70 border border-amber-500/40 rounded-3xl shadow-2xl space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-2.5">
+                <Lightbulb className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <span className="text-[10px] font-mono font-bold uppercase text-amber-400 tracking-wider block">
+                    AI Strategic Pivot Recommendation (Time-Travel Diff)
+                  </span>
+                  <p className="text-sm font-bold text-slate-100">
+                    {pivotSuggestion.pivotRationale}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleApplyPivotDiff}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center space-x-1.5 shrink-0"
+              >
+                <Sparkles className="w-4 h-4 text-slate-950" />
+                <span>{isApplyingDiff ? "適用中..." : "✨ このピボット案を採用する"}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-800/80">
+              {/* Q1 Diff */}
+              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-1.5">
+                <div className="flex items-center justify-between text-indigo-400 font-bold font-mono text-[11px]">
+                  <span>Target Pain 提案 (Q1)</span>
+                  <span className="text-slate-500 text-[10px]">{pivotSuggestion.diffQ1Explanation}</span>
+                </div>
+                <p className="text-slate-300 line-clamp-3 italic">
+                  "{pivotSuggestion.suggestedQ1}"
+                </p>
+              </div>
+
+              {/* Q3 Diff */}
+              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-1.5">
+                <div className="flex items-center justify-between text-purple-400 font-bold font-mono text-[11px]">
+                  <span>Core Edge 提案 (Q3)</span>
+                  <span className="text-slate-500 text-[10px]">{pivotSuggestion.diffQ3Explanation}</span>
+                </div>
+                <p className="text-slate-300 line-clamp-3 italic">
+                  "{pivotSuggestion.suggestedQ3}"
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ジョブ進行中の場合はポーリングトラッカーを表示 */}
         {activeJobId ? (
           <div className="space-y-4 animate-in fade-in duration-300">
@@ -193,7 +282,7 @@ function ValidateContent() {
           </div>
         ) : (
           <IdeaWizard
-            key={pivotFrom || "fresh-wizard"}
+            key={`${pivotFrom || "fresh"}-${JSON.stringify(initialValues)}`}
             initialValues={initialValues}
             onSubmit={handleWizardSubmit}
             isSubmitting={isSubmitting}
@@ -222,7 +311,7 @@ function ValidateContent() {
             </div>
             <button
               onClick={() => router.push("/validate")}
-              className="px-2 py-1 text-[10px] bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition shrink-0"
+              className="px-2 py-1 text-[10px] bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition shrink-0 cursor-pointer"
             >
               クリア
             </button>
