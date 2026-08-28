@@ -69,9 +69,9 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
         status: "📊 Bordaカウント(RPC)による上位10社の選定とデータ取得中...",
       }).eq("id", jobId);
 
-      // 設計書 2.7 準拠: Supabase calculate_borda_top10 RPC 経由で合意形成 Top 10 社を決定
+      // 設計書 2.7 & 3.6 準拠: Supabase calculate_borda_top10 RPC 経由で合意形成 Top 15 社を決定
       const { topCompanyNames } = await resolveTopCompaniesViaBorda(genreName);
-      const targetCompanies = topCompanyNames.slice(0, 8); // 上位6〜8社を対象に並列収集
+      const targetCompanies = topCompanyNames.slice(0, 15); // 最大15社を対象に並列収集 (Section 3.6)
 
       // 各企業のProduct HuntデータとTavily摩擦データを並列フェッチ
       const fetchTasks = targetCompanies.map(async (companyName) => {

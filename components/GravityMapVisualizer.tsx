@@ -16,8 +16,13 @@ import {
   Star,
   Target,
   Zap,
+  Lightbulb,
+  ArrowRight,
+  Loader2,
+  Layers,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { WhatIfCard } from "../app/api/market/whatif/route";
 
 export interface CustomPlanetData {
   id: string;
@@ -66,6 +71,8 @@ interface SimulationNode extends d3.SimulationNodeDatum {
   intensity?: number;
   radius: number;
   color: string;
+  hasCrater?: boolean;
+  isTensionOverload?: boolean;
   rawCompany?: EvaluatedCompanyNode;
   rawCustomPlanet?: CustomPlanetData;
 }
@@ -75,11 +82,14 @@ interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
   target: string | SimulationNode;
   distance: number;
   isCustomLink?: boolean;
+  isFrictionOverload?: boolean;
 }
 
 /**
  * D3.js 物理演算ベース重力マップ描画コンポーネント (GravityMapVisualizer)
- * 中心JTBD星、競合企業惑星、およびユーザーの仮説 (🪐 Custom Planet) を引力・反発力モデルでリアルタイムシミュレーション描画する。
+ * - 設計書 4.2 準拠: 高不満惑星のクレーター（三日月状の削り取り）＆赤く波打つテンションライン（Friction Waves）
+ * - 設計書 4.4 準拠: What-If カードのオンデマンド遅延生成（4パターン思考トリガー＆エディタドラフト）
+ * - 設計書 4.5 準拠: ユーザーの仮説 (🪐 Custom Planet) の合成配置と Time-Travel Pivot トリガー
  */
 export function GravityMapVisualizer({
   data,
@@ -93,7 +103,47 @@ export function GravityMapVisualizer({
   const [selectedCompany, setSelectedCompany] = useState<EvaluatedCompanyNode | null>(null);
   const [selectedCustomPlanet, setSelectedCustomPlanet] = useState<CustomPlanetData | null>(null);
 
+  // What-If オンデマンド生成状態
+  const [isGeneratingWhatIf, setIsGeneratingWhatIf] = useState(false);
+  const [whatIfCards, setWhatIfCards] = useState<WhatIfCard[]>([]);
+  const [selectedWhatIfCard, setSelectedWhatIfCard] = useState<WhatIfCard | null>(null);
+
   const activeCustomPlanet = overrideCustomPlanet || data.customPlanet || null;
+
+  // What-If 生成 API の呼び出し (設計書 4.4 準拠: 初期描画時は走らせず、クリック時にオンデマンド発火)
+  const handleGenerateWhatIf = async (company: EvaluatedCompanyNode) => {
+    try {
+      setIsGeneratingWhatIf(true);
+      setWhatIfCards([]);
+      setSelectedWhatIfCard(null);
+
+      const res = await fetch("/api/market/whatif", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          genreName: data.genreName,
+          competitorName: company.name,
+          targetFeatureId: company.targetFeatureId,
+          frictionScore: company.frictionScore,
+          pullScore: company.pullScore,
+          coreJtbd: data.coreJtbd,
+          description: company.description,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success && Array.isArray(json.cards)) {
+        setWhatIfCards(json.cards);
+        if (json.cards.length > 0) {
+          setSelectedWhatIfCard(json.cards[0]);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to generate What-If cards:", err);
+    } finally {
+      setIsGeneratingWhatIf(false);
+    }
+  };
 
   useEffect(() => {
     if (!svgRef.current || !data) return;
@@ -108,7 +158,7 @@ export function GravityMapVisualizer({
       id: "jtbd-center-star",
       type: "star",
       name: data.coreJtbd || data.genreName,
-      radius: 44,
+      radius: 46,
       color: "#6366f1", // Indigo / Purple
       fx: width / 2, // 中心固定
       fy: height / 2,
@@ -121,6 +171,8 @@ export function GravityMapVisualizer({
       // 摩擦が大きいほど赤・橙、引力が強いほど青・紫
       const hue = Math.max(10, 240 - (c.frictionScore || 50) * 2.2);
       const color = `hsl(${hue}, 85%, 60%)`;
+      const isTensionOverload = (c.frictionScore || 0) > (c.pullScore || 0) || (c.frictionScore || 0) >= 70;
+      const hasCrater = (c.frictionScore || 0) >= 50 || (c.intensity || 0) >= 6;
 
       return {
         id: c.companyId || `comp-${i}`,
@@ -132,8 +184,10 @@ export function GravityMapVisualizer({
         pullScore: c.pullScore,
         frictionScore: c.frictionScore,
         intensity: c.intensity,
-        radius: c.radius || 24,
+        radius: c.radius || 26,
         color,
+        hasCrater,
+        isTensionOverload,
         x: width / 2 + Math.cos(angle) * dist,
         y: height / 2 + Math.sin(angle) * dist,
         rawCompany: c,
@@ -146,7 +200,6 @@ export function GravityMapVisualizer({
       const pull = activeCustomPlanet.pullScore ?? 60;
       const frict = activeCustomPlanet.frictionScore ?? 40;
       const customDist = Math.max(100, 220 - pull * 1.3);
-      // 競合とは反対側の角度（または少しずらした位置）に初期配置
       const customAngle = -Math.PI / 4;
 
       customPlanetNodes.push({
@@ -177,6 +230,7 @@ export function GravityMapVisualizer({
           target: p.id,
           distance,
           isCustomLink: false,
+          isFrictionOverload: p.isTensionOverload,
         };
       }),
       ...customPlanetNodes.map((cp) => {
@@ -187,24 +241,34 @@ export function GravityMapVisualizer({
           target: cp.id,
           distance,
           isCustomLink: true,
+          isFrictionOverload: false,
         };
       }),
     ];
 
-    // 5. SVG コンテナ & Zoom グループ
-    const g = svg.append("g").attr("class", "gravity-map-container");
-
-    const zoom = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 3])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      });
-
-    svg.call(zoom);
-
-    // 6. 背景グラデーション・グローフィルター
+    // 5. SVG 定義 (フィルター・アニメーションスタイル)
     const defs = svg.append("defs");
+
+    // CSS Keyframes スタイルタグ (赤く波打つ Friction Waves アニメーション)
+    const styleEl = defs.append("style");
+    styleEl.text(`
+      @keyframes frictionWavePulse {
+        0% { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: -32; }
+      }
+      @keyframes craterWarningPulse {
+        0% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.15); opacity: 0.3; }
+        100% { transform: scale(1); opacity: 0.8; }
+      }
+      .friction-wave-active {
+        stroke: #f43f5e !important;
+        stroke-width: 3.5px !important;
+        stroke-dasharray: 6,4 !important;
+        animation: frictionWavePulse 0.7s linear infinite !important;
+        filter: url(#crimson-glow) !important;
+      }
+    `);
 
     // Standard Glow
     const glowFilter = defs
@@ -219,6 +283,19 @@ export function GravityMapVisualizer({
     feMerge.append("feMergeNode").attr("in", "coloredBlur");
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
+    // Crimson Glow (テンションライン用)
+    const crimsonGlow = defs
+      .append("filter")
+      .attr("id", "crimson-glow")
+      .attr("x", "-50%")
+      .attr("y", "-50%")
+      .attr("width", "200%")
+      .attr("height", "200%");
+    crimsonGlow.append("feGaussianBlur").attr("stdDeviation", "8").attr("result", "coloredBlur");
+    const crimsonMerge = crimsonGlow.append("feMerge");
+    crimsonMerge.append("feMergeNode").attr("in", "coloredBlur");
+    crimsonMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
     // Custom Planet Gold Glow
     const goldGlow = defs
       .append("filter")
@@ -232,16 +309,33 @@ export function GravityMapVisualizer({
     goldMerge.append("feMergeNode").attr("in", "coloredBlur");
     goldMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    // 7. 重力リンク描画
+    // 6. SVG コンテナ & Zoom グループ
+    const g = svg.append("g").attr("class", "gravity-map-container");
+
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.5, 3])
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      });
+
+    svg.call(zoom);
+
+    // 7. 重力リンク描画 (テンションライン / Friction Waves)
     const linkGroup = g.append("g").attr("class", "links");
     const linkElements = linkGroup
       .selectAll("line")
       .data(links)
       .enter()
       .append("line")
-      .attr("stroke", (d) => (d.isCustomLink ? "rgba(245, 158, 11, 0.6)" : "rgba(99, 102, 241, 0.25)"))
-      .attr("stroke-width", (d) => (d.isCustomLink ? 2.5 : 1.5))
-      .attr("stroke-dasharray", (d) => (d.isCustomLink ? "5,3" : "4,4"));
+      .attr("class", (d) => (d.isFrictionOverload ? "friction-wave-active" : ""))
+      .attr("stroke", (d) => {
+        if (d.isCustomLink) return "rgba(245, 158, 11, 0.7)";
+        if (d.isFrictionOverload) return "#f43f5e";
+        return "rgba(99, 102, 241, 0.25)";
+      })
+      .attr("stroke-width", (d) => (d.isFrictionOverload ? 3.5 : d.isCustomLink ? 2.5 : 1.5))
+      .attr("stroke-dasharray", (d) => (d.isCustomLink ? "5,3" : d.isFrictionOverload ? "6,4" : "4,4"));
 
     // 8. ノードグループ
     const nodeGroup = g.append("g").attr("class", "nodes");
@@ -276,13 +370,27 @@ export function GravityMapVisualizer({
         if (d.rawCustomPlanet) {
           setSelectedCompany(null);
           setSelectedCustomPlanet(d.rawCustomPlanet);
+          setWhatIfCards([]);
         } else if (d.rawCompany) {
           setSelectedCustomPlanet(null);
           setSelectedCompany(d.rawCompany);
+          setWhatIfCards([]);
         }
       });
 
-    // ノードサークル描画
+    // 4.2 テンション臨界点 (Push > Pull) の警告パルスリング
+    nodeElements
+      .filter((d) => Boolean(d.isTensionOverload))
+      .append("circle")
+      .attr("r", (d) => d.radius + 10)
+      .attr("fill", "none")
+      .attr("stroke", "#f43f5e")
+      .attr("stroke-width", 2)
+      .attr("stroke-dasharray", "4,3")
+      .attr("opacity", 0.8)
+      .style("animation", "craterWarningPulse 1.5s ease-in-out infinite");
+
+    // メインの惑星円サークル
     nodeElements
       .append("circle")
       .attr("r", (d) => d.radius)
@@ -290,17 +398,61 @@ export function GravityMapVisualizer({
       .attr("stroke", (d) => {
         if (d.type === "custom_planet") return "#fef08a";
         if (d.type === "star") return "#e0e7ff";
+        if (d.isTensionOverload) return "#f43f5e";
         return "rgba(255, 255, 255, 0.4)";
       })
       .attr("stroke-width", (d) => {
         if (d.type === "custom_planet") return 3.5;
         if (d.type === "star") return 3;
+        if (d.isTensionOverload) return 2.5;
         return 1.5;
       })
-      .attr("filter", (d) => (d.type === "custom_planet" ? "url(#gold-glow)" : "url(#glow)"))
+      .attr("filter", (d) => {
+        if (d.type === "custom_planet") return "url(#gold-glow)";
+        if (d.isTensionOverload) return "url(#crimson-glow)";
+        return "url(#glow)";
+      })
       .attr("opacity", (d) => (d.type === "custom_planet" ? 1 : 0.9));
 
-    // Custom Planet 🪐 の土星リング (Planetary Orbit Ring)
+    // 4.2 クレーター（三日月状の削り取り・クレーター跡描画）
+    // 摩擦が大きい惑星に、削り取られたクレーターマークを描画
+    const craterNodes = nodeElements.filter((d) => Boolean(d.hasCrater));
+
+    // クレーターの月面クレーター傷 (Crater spots)
+    craterNodes
+      .append("circle")
+      .attr("cx", (d) => d.radius * 0.4)
+      .attr("cy", (d) => -d.radius * 0.3)
+      .attr("r", (d) => Math.max(3, d.radius * 0.28))
+      .attr("fill", "#0f172a")
+      .attr("stroke", "rgba(244, 63, 94, 0.6)")
+      .attr("stroke-width", 1.5)
+      .attr("opacity", 0.9);
+
+    craterNodes
+      .append("circle")
+      .attr("cx", (d) => -d.radius * 0.3)
+      .attr("cy", (d) => d.radius * 0.35)
+      .attr("r", (d) => Math.max(2.5, d.radius * 0.2))
+      .attr("fill", "#0f172a")
+      .attr("stroke", "rgba(244, 63, 94, 0.5)")
+      .attr("stroke-width", 1.2)
+      .attr("opacity", 0.85);
+
+    // 三日月状の欠損を示す三日月アーク
+    craterNodes
+      .append("path")
+      .attr("d", (d) => {
+        const r = d.radius;
+        // 三日月形状のクリッピングパス
+        return `M 0 -${r} A ${r} ${r} 0 0 1 ${r} 0 A ${r * 0.8} ${r * 0.8} 0 0 0 0 -${r} Z`;
+      })
+      .attr("fill", "rgba(15, 23, 42, 0.75)")
+      .attr("stroke", "#f43f5e")
+      .attr("stroke-width", 1.5)
+      .attr("opacity", 0.95);
+
+    // 🪐 Custom Planet の土星リング (Planetary Orbit Ring)
     const customPlanetElements = nodeElements.filter((d) => d.type === "custom_planet");
 
     customPlanetElements
@@ -327,7 +479,7 @@ export function GravityMapVisualizer({
     nodeElements
       .filter((d) => d.type === "star")
       .append("circle")
-      .attr("r", 58)
+      .attr("r", 60)
       .attr("fill", "none")
       .attr("stroke", "rgba(129, 140, 248, 0.35)")
       .attr("stroke-width", 2)
@@ -337,11 +489,11 @@ export function GravityMapVisualizer({
     nodeElements
       .append("text")
       .text((d) => d.name)
-      .attr("dy", (d) => (d.type === "star" ? 6 : d.radius + 15))
+      .attr("dy", (d) => (d.type === "star" ? 6 : d.radius + 16))
       .attr("text-anchor", "middle")
-      .attr("fill", (d) => (d.type === "custom_planet" ? "#fef08a" : "#f1f5f9"))
+      .attr("fill", (d) => (d.type === "custom_planet" ? "#fef08a" : d.isTensionOverload ? "#fca5a5" : "#f1f5f9"))
       .attr("font-size", (d) => (d.type === "star" ? "12px" : d.type === "custom_planet" ? "12px" : "11px"))
-      .attr("font-weight", (d) => (d.type === "star" || d.type === "custom_planet" ? "800" : "500"))
+      .attr("font-weight", (d) => (d.type === "star" || d.type === "custom_planet" || d.isTensionOverload ? "800" : "500"))
       .attr("pointer-events", "none")
       .style("text-shadow", "0 2px 5px rgba(0,0,0,0.9)");
 
@@ -356,8 +508,8 @@ export function GravityMapVisualizer({
           .distance((d) => d.distance)
           .strength(0.6)
       )
-      .force("charge", d3.forceManyBody().strength(-350))
-      .force("collide", d3.forceCollide<SimulationNode>().radius((d) => d.radius + 22))
+      .force("charge", d3.forceManyBody().strength(-360))
+      .force("collide", d3.forceCollide<SimulationNode>().radius((d) => d.radius + 24))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .on("tick", () => {
         linkElements
@@ -392,7 +544,7 @@ export function GravityMapVisualizer({
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-auto block select-none"
-        style={{ minHeight: "520px" }}
+        style={{ minHeight: "540px" }}
       />
 
       {/* 凡例 / コントロール */}
@@ -406,8 +558,11 @@ export function GravityMapVisualizer({
           <span>Low Friction</span>
         </div>
         <div className="flex items-center space-x-1.5">
-          <div className="w-3 h-3 rounded-full bg-rose-500" />
-          <span>High Friction (Gap)</span>
+          <div className="w-3 h-3 rounded-full bg-rose-500 border border-rose-400" />
+          <span>Crater / Friction Overload</span>
+        </div>
+        <div className="flex items-center space-x-1.5 text-rose-400 font-mono font-bold">
+          <span>⚡ Friction Waves</span>
         </div>
         {activeCustomPlanet && (
           <div className="flex items-center space-x-1.5 pl-2 border-l border-slate-800 text-amber-300 font-semibold">
@@ -417,17 +572,20 @@ export function GravityMapVisualizer({
         )}
       </div>
 
-      {/* 競合企業詳細サイドインスペクター */}
+      {/* 競合企業詳細サイドインスペクター & What-If オンデマンド生成 */}
       {selectedCompany && (
-        <div className="absolute top-4 right-4 z-20 w-80 bg-slate-900/95 backdrop-blur-lg border border-slate-800 rounded-3xl p-5 shadow-2xl text-slate-100 animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className="absolute top-4 right-4 z-20 w-88 max-h-[92%] overflow-y-auto bg-slate-900/95 backdrop-blur-lg border border-slate-800 rounded-3xl p-5 shadow-2xl text-slate-100 animate-in fade-in slide-in-from-right-4 duration-300 scrollbar-thin">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center space-x-2">
               <Globe className="w-4 h-4 text-indigo-400" />
               <h3 className="font-bold text-base text-slate-100">{selectedCompany.name}</h3>
             </div>
             <button
-              onClick={() => setSelectedCompany(null)}
-              className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+              onClick={() => {
+                setSelectedCompany(null);
+                setWhatIfCards([]);
+              }}
+              className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -435,7 +593,7 @@ export function GravityMapVisualizer({
 
           <div className="mt-3 space-y-3 text-xs">
             <p className="text-slate-300 italic">"{selectedCompany.tagline}"</p>
-            <p className="text-slate-400 line-clamp-3">{selectedCompany.description}</p>
+            <p className="text-slate-400 line-clamp-3 leading-relaxed">{selectedCompany.description}</p>
 
             {/* スコア指標 */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
@@ -462,15 +620,101 @@ export function GravityMapVisualizer({
               </div>
             </div>
 
-            {/* 主要摩擦ポイント */}
+            {/* 主要摩擦ポイント (クレーター情報) */}
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start space-x-2 text-rose-300">
               <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <div>
-                <span className="font-semibold block">Primary Friction Feature:</span>
+                <span className="font-semibold block">Crater Feature (摩擦集中点):</span>
                 <span className="font-mono text-[11px] text-rose-200">
                   {selectedCompany.targetFeatureId} (Intensity: {selectedCompany.intensity}/10)
                 </span>
               </div>
+            </div>
+
+            {/* ========================================================================= */}
+            {/* 4.4 What-If カードのオンデマンド遅延生成エリア */}
+            {/* ========================================================================= */}
+            <div className="pt-2 border-t border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-300 flex items-center space-x-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>What-If Idea Generator</span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">On-Demand</span>
+              </div>
+
+              {whatIfCards.length === 0 ? (
+                <button
+                  disabled={isGeneratingWhatIf}
+                  onClick={() => handleGenerateWhatIf(selectedCompany)}
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  {isGeneratingWhatIf ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                      <span>Gemini 3.1 Pro 思考中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lightbulb className="w-4 h-4 text-slate-950" />
+                      <span>✨ ここでアイディアを生成 (What-If)</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div className="space-y-3 animate-in fade-in duration-300">
+                  <div className="grid grid-cols-2 gap-2">
+                    {whatIfCards.map((card) => {
+                      const isCardSelected = selectedWhatIfCard?.id === card.id;
+                      return (
+                        <button
+                          key={card.id}
+                          onClick={() => setSelectedWhatIfCard(card)}
+                          className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isCardSelected
+                              ? "bg-amber-500/20 border-amber-500 text-amber-200 shadow"
+                              : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center space-x-1 mb-1">
+                            <span>{card.patternEmoji}</span>
+                            <span className="text-[10px] font-bold line-clamp-1">{card.patternName.split("(")[0]}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-300 line-clamp-2">{card.coreConcept}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 選択中の What-If カード詳細 & エディタ起動ボタン */}
+                  {selectedWhatIfCard && (
+                    <div className="p-3 bg-slate-950 rounded-2xl border border-amber-500/30 space-y-2 text-xs animate-in fade-in">
+                      <div className="flex items-center space-x-1.5 text-amber-300 font-bold">
+                        <span>{selectedWhatIfCard.patternEmoji}</span>
+                        <span>{selectedWhatIfCard.patternName}</span>
+                      </div>
+                      <p className="text-slate-200 italic">"{selectedWhatIfCard.provocativeQuestion}"</p>
+                      <p className="text-slate-400 text-[11px] leading-relaxed">{selectedWhatIfCard.coreConcept}</p>
+
+                      <button
+                        onClick={() => {
+                          const query = new URLSearchParams({
+                            targetPain: selectedWhatIfCard.editorDraft.q1_target_pain,
+                            solution: selectedWhatIfCard.editorDraft.q2_solution,
+                            coreEdge: selectedWhatIfCard.editorDraft.q3_core_edge,
+                            targetLiteracy: selectedWhatIfCard.editorDraft.q4_target_literacy,
+                          }).toString();
+                          router.push(`/validate?${query}`);
+                        }}
+                        className="w-full mt-2 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center justify-center space-x-1.5"
+                      >
+                        <span>🚀 この仮説で検証を開始 (Launch in Editor)</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 外部リンク */}
@@ -506,7 +750,7 @@ export function GravityMapVisualizer({
             </div>
             <button
               onClick={() => setSelectedCustomPlanet(null)}
-              className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+              className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>

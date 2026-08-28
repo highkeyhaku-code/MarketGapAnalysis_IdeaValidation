@@ -22,6 +22,10 @@ function ValidateContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pivotFrom = searchParams.get("pivotFrom");
+  const targetPainQuery = searchParams.get("targetPain");
+  const solutionQuery = searchParams.get("solution");
+  const coreEdgeQuery = searchParams.get("coreEdge");
+  const targetLiteracyQuery = searchParams.get("targetLiteracy");
 
   const [loadingInitial, setLoadingInitial] = useState(Boolean(pivotFrom));
   const [initialValues, setInitialValues] = useState<Partial<IdeaInput> | undefined>(undefined);
@@ -29,6 +33,21 @@ function ValidateContent() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [createdCommitId, setCreatedCommitId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // What-If カードからのクエリ復元
+  useEffect(() => {
+    if (pivotFrom) return;
+    if (targetPainQuery || solutionQuery || coreEdgeQuery) {
+      setInitialValues({
+        q1_target_pain: targetPainQuery || "",
+        q2_solution: solutionQuery || "",
+        q3_core_edge: coreEdgeQuery || "",
+        q4_target_literacy: (targetLiteracyQuery as any) || "beginner",
+        q4_monetization_model: "subscription",
+        q4_supplementary_pains: [],
+      });
+    }
+  }, [pivotFrom, targetPainQuery, solutionQuery, coreEdgeQuery, targetLiteracyQuery]);
 
   // Time-Travel: 過去のコミットから状態を復元
   useEffect(() => {
