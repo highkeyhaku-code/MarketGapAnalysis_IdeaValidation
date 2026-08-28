@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "tsx ./scripts/test-e2e-scenarios.mjs",
+    "test:e2e": "tsx --env-file=.env.local ./scripts/test-e2e-scenarios.mjs",
     "test:health": "tsx ./scripts/test-health-endpoint.mjs"
   },
   "dependencies": {

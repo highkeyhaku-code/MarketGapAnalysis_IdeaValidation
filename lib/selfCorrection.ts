@@ -26,7 +26,6 @@ export interface SelfCorrectionOptions<T> {
 /**
  * 自己修正ループ (fetchWithZodSelfCorrection)
  * 最大3回の再試行ループ。ZodError検知時、エラーメッセージをプロンプトに動的付与してLLMに再要求。
- * 3回失敗時は null を返す。
  */
 export async function fetchWithZodSelfCorrection<T>({
   llmCaller,
@@ -59,16 +58,21 @@ export async function fetchWithZodSelfCorrection<T>({
     } catch (err: unknown) {
       if (err instanceof ZodError) {
         lastError = JSON.stringify(err.issues, null, 2);
+        console.warn(`[fetchWithZodSelfCorrection] Attempt ${attempt}/${maxRetries} ZodError:`, lastError);
       } else if (err instanceof SyntaxError) {
         lastError = `Invalid JSON syntax: ${err.message}`;
+        console.warn(`[fetchWithZodSelfCorrection] Attempt ${attempt}/${maxRetries} SyntaxError:`, lastError);
       } else if (err instanceof Error) {
         lastError = err.message;
+        console.warn(`[fetchWithZodSelfCorrection] Attempt ${attempt}/${maxRetries} Error:`, lastError);
       } else {
         lastError = String(err);
+        console.warn(`[fetchWithZodSelfCorrection] Attempt ${attempt}/${maxRetries} UnknownError:`, lastError);
       }
     }
   }
 
+  console.error(`[fetchWithZodSelfCorrection] Exhausted all ${maxRetries} attempts without valid schema match.`);
   return null;
 }
 

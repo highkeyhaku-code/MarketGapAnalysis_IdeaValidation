@@ -41,31 +41,38 @@ export async function evaluateDeltaSyncPipeline(
     };
   }
 
-  // 1. market_cache から既存キャッシュを取得
-  let query = supabaseAdmin
-    .from("market_cache")
-    .select("genre_id, materialized_json, updated_at")
-    .order("updated_at", { ascending: false });
-
-  if (genreId && genreId.length > 0) {
-    query = query.eq("genre_id", genreId);
-  }
-
-  const { data: cacheRecords, error } = await query.limit(1);
-
-  if (error || !cacheRecords || cacheRecords.length === 0 || !cacheRecords[0]?.materialized_json) {
+  // 1. market_cache から既存キャッシュを取得 (厳格な genreId 一致)
+  if (!genreId || genreId.trim().length === 0) {
     return {
       shouldRunLlm: true,
       level: 3,
       elapsedDays: 999,
       newAppsCount: options.newAppsCount ?? 15,
       followerGrowth: options.followerGrowth ?? 600,
-      reason: "Level 3: 既存キャッシュなし（初回ブートストラップ）。LLMバッチ評価を実行します。",
+      reason: "Level 3: No genreId provided.",
       cachedData: null,
     };
   }
 
-  const cache = cacheRecords[0];
+  const { data: cacheRecord, error } = await supabaseAdmin
+    .from("market_cache")
+    .select("genre_id, materialized_json, updated_at")
+    .eq("genre_id", genreId)
+    .single();
+
+  if (error || !cacheRecord || !cacheRecord.materialized_json) {
+    return {
+      shouldRunLlm: true,
+      level: 3,
+      elapsedDays: 999,
+      newAppsCount: options.newAppsCount ?? 15,
+      followerGrowth: options.followerGrowth ?? 600,
+      reason: `Level 3: 該当ジャンル (${genreId}) の既存キャッシュなし。LLMバッチ評価を実行します。`,
+      cachedData: null,
+    };
+  }
+
+  const cache = cacheRecord;
   const updatedAt = new Date(cache.updated_at);
   const now = new Date();
   const elapsedDays = Math.max(0, Math.floor((now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60 * 24)));

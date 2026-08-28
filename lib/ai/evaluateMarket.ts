@@ -2,6 +2,7 @@ import { ProductHuntAppDetails } from "../api/producthunt";
 import { fetchWithZodSelfCorrection } from "../selfCorrection";
 import { MarketInsightSchema, MarketInsight } from "../../schemas/zod";
 import { callGemini } from "./gemini";
+import { z } from "zod";
 
 export interface CompanyMarketInput {
   appDetails: ProductHuntAppDetails;
@@ -16,7 +17,7 @@ export interface EvaluatedCompanyNode {
   homepageUrl: string;
   logoUrl?: string;
   pullScore: number; // 総合引力 (0 - 100)
-  pullScores: Record<string, number>; // 【Directive 3】多対多引力マトリックス { "jtbd-star-0": 85, "jtbd-star-1": 40, ... }
+  pullScores: Record<string, number>; // 多対多引力マトリックス { "jtbd-star-0": 85, "jtbd-star-1": 40, ... }
   frictionScore: number; // 反発力 (0 - 100): 摩擦・ペインの大きさ
   intensity: number; // 摩擦強度 (1 - 10)
   targetFeatureId: string;
@@ -54,72 +55,110 @@ export interface MarketEvaluationResult {
   evaluatedAt: string;
 }
 
+const SectorJtbdSchema = z
+  .object({
+    core_jtbd: z.string().optional(),
+    coreJtbd: z.string().optional(),
+    sub_jtbds: z.array(z.string()).optional(),
+    subJtbds: z.array(z.string()).optional(),
+  })
+  .transform((data) => ({
+    coreJtbd: data.coreJtbd || data.core_jtbd || "Empower and automate core workflows in this domain",
+    subJtbds: data.subJtbds || data.sub_jtbds || [],
+  }));
+
+/**
+ * 3.1 ジャンル固有の動的 JTBD 抽出
+ * Gemini 3 Flash をコールし、対象市場の特性に特化した 4 つの独立した JTBD 目標を動的に生成する
+ */
+export async function extractSectorJtbds(genreName: string): Promise<{ coreJtbd: string; subJtbds: string[] }> {
+  const prompt = `
+You are a world-class market taxonomy and Jobs-To-Be-Done (JTBD) strategist.
+For the specific SaaS market sector "${genreName}", extract 1 primary Core JTBD and 4 highly distinctive, specialized, domain-tailored Sub-JTBD objectives.
+
+Rules:
+- Do NOT output generic software terms like "good speed" or "easy setup" unless specifically relevant.
+- Make each JTBD sharply reflect the technical and operational workflows of "${genreName}".
+- Return a valid JSON object strictly matching:
+{
+  "coreJtbd": "Core objective of this market in 1 sentence",
+  "subJtbds": [
+    "Specific Workflow Objective 1",
+    "Specific Workflow Objective 2",
+    "Specific Workflow Objective 3",
+    "Specific Workflow Objective 4"
+  ]
+}
+`;
+
+  try {
+    const extracted = await fetchWithZodSelfCorrection({
+      llmCaller: async (p) => callGemini(p, { temperature: 0.2, responseMimeType: "application/json" }),
+      initialPrompt: prompt,
+      schema: SectorJtbdSchema,
+      maxRetries: 2,
+    });
+
+    if (extracted && extracted.subJtbds.length >= 3) {
+      return extracted;
+    }
+  } catch (err) {
+    console.warn(`[extractSectorJtbds] Error extracting JTBDs for ${genreName}:`, err);
+  }
+
+  // ドメイン別フォールバック
+  const norm = genreName.toLowerCase();
+  let defaultSubs = [
+    `0-Config Setup for ${genreName}`,
+    "Real-Time Collaboration & Speed",
+    "Deep API Ecosystem & Integrations",
+    "Bottom-Up Team Adoption",
+  ];
+
+  if (norm.includes("agent") || norm.includes("autonomous") || norm.includes("ai")) {
+    defaultSubs = [
+      "Autonomous Multi-Step Goal Execution",
+      "Low-Latency Model Tool Calling & Routing",
+      "Enterprise Observability & Guardrails",
+      "Zero-Code Visual Agent Canvas",
+    ];
+  } else if (norm.includes("security") || norm.includes("compliance") || norm.includes("soc2")) {
+    defaultSubs = [
+      "Continuous Automated Evidence Ingestion",
+      "Zero-Trust Identity & Granular RBAC",
+      "Shadow IT & Secret Leak Prevention",
+      "One-Click Auditor Data Room Export",
+    ];
+  } else if (norm.includes("billing") || norm.includes("metering") || norm.includes("fintech")) {
+    defaultSubs = [
+      "High-Throughput Usage Event Metering",
+      "Multi-Currency Real-Time Ledger Sync",
+      "Self-Serve Plan Upgrade & Checkout",
+      "Automated Dunning & Revenue Defense",
+    ];
+  }
+
+  return {
+    coreJtbd: `Empower and automate core workflows in ${genreName}`,
+    subJtbds: defaultSubs,
+  };
+}
+
 /**
  * 複数企業のProduct Huntデータと濃縮摩擦コーパスを並列にGeminiで評価し、
  * D3.js用多対多引力マトリックスと物理スカラー値を算出する
- * 
- * - Directive 2: モックを完全廃止し、fetchWithZodSelfCorrection で Gemini 3 Flash を本番コール
- * - Directive 3: 各企業が pull_scores (JTBDごとの引力マップ) を持ち、多対多の重力場を形成
  */
 export async function evaluateMarketBatch(
   genreId: string,
   genreName: string,
   inputs: CompanyMarketInput[]
 ): Promise<MarketEvaluationResult> {
-  const norm = genreName.toLowerCase();
+  // 1. 対象ジャンル固有の動的 JTBD を抽出
+  const { coreJtbd, subJtbds } = await extractSectorJtbds(genreName);
 
-  // 1. ジャンルに合わせた 3〜4 個の具体的な JTBD 目標を定義
-  let subJtbds: string[] = [];
-  if (norm.includes("agent") || norm.includes("autonomous") || norm.includes("orchestrat") || norm.includes("ai")) {
-    subJtbds = [
-      "Autonomous Multi-Step Goal Execution",
-      "Low-Latency Tool Calling & Routing",
-      "Enterprise Observability & Guardrails",
-      "Zero-Code Visual Agent Builder",
-    ];
-  } else if (norm.includes("video") || norm.includes("avatar") || norm.includes("voice") || norm.includes("creative")) {
-    subJtbds = [
-      "Photorealistic Generative Rendering",
-      "Real-Time Voice & Lip-Sync Speed",
-      "Intuitive Timeline & Multi-Track Canvas",
-      "Automated Script-to-Video Workflow",
-    ];
-  } else if (norm.includes("security") || norm.includes("compliance") || norm.includes("soc2") || norm.includes("vault")) {
-    subJtbds = [
-      "Continuous Automated Evidence Audit",
-      "Zero-Trust Identity & Granular RBAC",
-      "Shadow IT & Secret Leak Prevention",
-      "One-Click Vendor Security Review",
-    ];
-  } else if (norm.includes("billing") || norm.includes("metering") || norm.includes("fintech") || norm.includes("spend")) {
-    subJtbds = [
-      "High-Throughput Usage Metering",
-      "Multi-Currency Real-Time Ledger Sync",
-      "Self-Serve Plan Upgrade & Checkout",
-      "Automated Dunning & Revenue Defense",
-    ];
-  } else if (norm.includes("support") || norm.includes("helpdesk") || norm.includes("customer")) {
-    subJtbds = [
-      "Instant Autonomous Ticket Resolution",
-      "Omnichannel Real-Time Inbox Unification",
-      "Customer Churn & Health Risk Telemetry",
-      "Zero-Setup Interactive Help Center",
-    ];
-  } else if (norm.includes("sales") || norm.includes("crm") || norm.includes("outbound") || norm.includes("lead")) {
-    subJtbds = [
-      "Frictionless Automated Contact Enrichment",
-      "Multi-Channel Viral Outbound Sequences",
-      "Real-Time Deal Risk & Objection Radar",
-      "Zero-Data-Entry CRM Sync",
-    ];
-  } else {
-    subJtbds = [
-      `0-Config Seamless Setup for ${genreName}`,
-      "Real-Time Collaboration & Speed",
-      "Deep API Ecosystem & Integrations",
-      "Bottom-Up Team Adoption (PLG)",
-    ];
-  }
+  console.log(`[evaluateMarketBatch] ▶ Starting evaluation for genre: "${genreName}" (ID: ${genreId})`);
+  console.log(`[evaluateMarketBatch]   Dynamic Sector JTBDs (${subJtbds.length}):`, subJtbds);
+  console.log(`[evaluateMarketBatch]   Target Companies (${inputs.length}):`, inputs.map((i) => i.appDetails.name));
 
   const jtbdDefinitions = subJtbds
     .map((jtbd, i) => `- Star ${i} (jtbd-star-${i}): "${jtbd}"`)
@@ -148,8 +187,9 @@ ${jtbdDefinitions}
 ${compressedFriction || "No specific complaints recorded."}
 
 Instructions:
-1. For each JTBD Star (jtbd-star-0 to jtbd-star-${subJtbds.length - 1}), evaluate this product's gravitational attraction score (0 to 100) indicating how strongly it satisfies that specific objective.
-2. Identify the single primary friction source ("target_feature_id") and its complaint intensity (1 to 10).
+1. For each JTBD Star (jtbd-star-0 to jtbd-star-${subJtbds.length - 1}), evaluate this product's gravitational attraction score (0 to 100).
+   - IMPORTANT: Differentiate scores across the stars based on the company's real strengths. (e.g. 90 on Star 0, 45 on Star 1, 85 on Star 2). Do NOT assign uniform values.
+2. Identify the single primary friction source ("target_feature_id") and complaint intensity (1 to 10).
 3. Provide a clear 1-2 sentence explanation in "score_reasoning" detailing why this company received these scores.
 
 Return a valid JSON object strictly conforming to:
@@ -157,7 +197,7 @@ Return a valid JSON object strictly conforming to:
   "pull_scores": {
     ${subJtbds.map((_, i) => `"jtbd-star-${i}": <0-100 integer>`).join(",\n    ")}
   },
-  "friction_score": <10-100 integer representing overall push/friction>,
+  "friction_score": <10-100 integer representing push/friction>,
   "target_feature_id": "short_snake_case_name_of_primary_friction_source",
   "intensity": <1-10 integer representing friction severity>,
   "needs_web_search": false,
@@ -169,7 +209,11 @@ Return a valid JSON object strictly conforming to:
 
     // fetchWithZodSelfCorrection を用いてスキーマ検証と自己修正ループを実行
     const insight: MarketInsight | null = await fetchWithZodSelfCorrection({
-      llmCaller: async (p) => callGemini(p, { temperature: 0.1, responseMimeType: "application/json" }),
+      llmCaller: async (p) => {
+        const res = await callGemini(p, { temperature: 0.1, responseMimeType: "application/json" });
+        console.log(`[evaluateMarketBatch] Raw Gemini Output for ${appDetails.name}:`, res.slice(0, 180) + "...");
+        return res;
+      },
       initialPrompt: prompt,
       schema: MarketInsightSchema,
       maxRetries: 3,
@@ -189,7 +233,7 @@ Return a valid JSON object strictly conforming to:
       let pScore = insight?.pull_scores?.[starKey];
       if (typeof pScore !== "number" || isNaN(pScore)) {
         // フォールバック計算
-        const base = Math.min(90, Math.max(30, 45 + ((idx * 17 + i * 23) % 45)));
+        const base = Math.min(92, Math.max(30, 48 + ((idx * 19 + i * 27) % 45)));
         pScore = base;
       }
       dynamicPullScores[starKey] = Math.max(10, Math.min(98, Math.round(pScore)));
@@ -267,7 +311,7 @@ Return a valid JSON object strictly conforming to:
   return {
     genreId,
     genreName,
-    coreJtbd: `Empower and automate core workflows in ${genreName}`,
+    coreJtbd,
     subJtbds,
     companies: evaluatedCompanies,
     craters,
