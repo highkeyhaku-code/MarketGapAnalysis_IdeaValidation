@@ -26,6 +26,12 @@ import {
 } from "lucide-react";
 import { EmotionalNutritionLabel } from "../../../../components/EmotionalNutritionLabel";
 import { VSCardBoard } from "../../../../components/VSCardBoard";
+import {
+  GravityMapVisualizer,
+  GravityMapData,
+  CustomPlanetData,
+} from "../../../../components/GravityMapVisualizer";
+import { EvaluatedCompanyNode } from "../../../../lib/ai/evaluateMarket";
 
 export default function ValidationResultPage() {
   const params = useParams();
@@ -37,6 +43,7 @@ export default function ValidationResultPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showPivotToast, setShowPivotToast] = useState(false);
+  const [activeViewTab, setActiveViewTab] = useState<"crash_report" | "gravity_map">("crash_report");
 
   useEffect(() => {
     if (!commitId) return;
@@ -138,6 +145,97 @@ export default function ValidationResultPage() {
     penalizedCount: scores?.domainScore?.penalizedCount ?? 2,
   };
 
+  const incumbentName = competitorProfile?.incumbentName || "Incumbent Leader";
+
+  const targetGenreName =
+    incumbentName === "HubSpot" || incumbentName.toLowerCase().includes("crm")
+      ? "B2B Sales CRM & Lead Intelligence"
+      : incumbentName === "GitHub" || incumbentName.toLowerCase().includes("git") || incumbentName.toLowerCase().includes("dev")
+      ? "Developer Infrastructure & AI Code Tools"
+      : "Project Management & Workflow Automation";
+
+  const createCompetitor = (
+    companyId: string,
+    name: string,
+    tagline: string,
+    description: string,
+    homepageUrl: string,
+    pullScore: number,
+    frictionScore: number,
+    radius: number,
+    targetFeatureId: string,
+    intensity: number
+  ): EvaluatedCompanyNode => ({
+    companyId,
+    name,
+    tagline,
+    description,
+    homepageUrl,
+    pullScore,
+    frictionScore,
+    radius,
+    targetFeatureId,
+    intensity,
+    gravityStrength: pullScore / 100,
+    physicalScores: {
+      integration_cost: 0,
+      switching_barrier: 0,
+      learning_curve: 0,
+      security_compliance: 0,
+      customizability: 0,
+      realtime_performance: 0,
+      price_sensitivity: 0,
+      ui_simplicity: 0,
+      network_effect: 0,
+    },
+  });
+
+  const defaultCompetitorList: EvaluatedCompanyNode[] =
+    incumbentName === "HubSpot"
+      ? [
+          createCompetitor("comp-hubspot", "HubSpot", "Inbound CRM & Marketing Hub", "Market leader with expansive feature set", "https://hubspot.com", 92, 84, 42, "pricing_and_setup_overhead", 9),
+          createCompetitor("comp-salesforce", "Salesforce", "Enterprise Cloud CRM", "Complex legacy enterprise standard", "https://salesforce.com", 95, 88, 46, "configuration_complexity", 9),
+          createCompetitor("comp-attio", "Attio", "Data-driven modern CRM", "Realtime data sync and custom model", "https://attio.com", 82, 45, 30, "learning_curve", 5),
+          createCompetitor("comp-folk", "Folk", "All-in-one relationship management", "Lightweight contact CRM", "https://folk.app", 76, 40, 26, "integrations", 4),
+          createCompetitor("comp-pipedrive", "Pipedrive", "Pipeline CRM for sales teams", "Visual deal tracking tool", "https://pipedrive.com", 78, 55, 28, "ai_automation", 6),
+        ]
+      : incumbentName === "GitHub"
+      ? [
+          createCompetitor("comp-github", "GitHub", "Where the world builds software", "Monolithic repository & actions platform", "https://github.com", 98, 68, 46, "workflow_complexity", 7),
+          createCompetitor("comp-gitlab", "GitLab", "The DevSecOps Platform", "End-to-end devops suite", "https://gitlab.com", 90, 72, 40, "ui_simplicity", 8),
+          createCompetitor("comp-vercel", "Vercel", "Frontend cloud platform", "Framework-defined deployment", "https://vercel.com", 88, 52, 34, "vendor_lockin", 5),
+          createCompetitor("comp-supabase", "Supabase", "Open source Firebase alternative", "Postgres with realtime and auth", "https://supabase.com", 85, 48, 32, "db_management", 5),
+          createCompetitor("comp-cursor", "Cursor", "The AI Code Editor", "VS Code fork with deep LLM repo awareness", "https://cursor.com", 86, 58, 32, "resource_consumption", 6),
+        ]
+      : [
+          createCompetitor("comp-notion", "Notion", "All-in-one workspace", "Docs, wikis, and projects hub", "https://notion.so", 95, 78, 44, "database_speed_and_complexity", 8),
+          createCompetitor("comp-linear", "Linear", "Issue tracking built for speed", "Streamline software projects and sprints", "https://linear.app", 90, 42, 34, "non_tech_customization", 5),
+          createCompetitor("comp-asana", "Asana", "Work management platform", "Enterprise portfolio task tracking", "https://asana.com", 86, 70, 38, "notification_noise", 7),
+          createCompetitor("comp-monday", "Monday.com", "Customizable work OS", "Visual workflow tables", "https://monday.com", 85, 74, 36, "pricing_tiers", 8),
+          createCompetitor("comp-clickup", "ClickUp", "One app to replace them all", "Feature-heavy all-in-one productivity suite", "https://clickup.com", 84, 82, 36, "lag_and_overwhelm", 9),
+        ];
+
+  const customPlanet: CustomPlanetData = {
+    id: commitId,
+    name: "あなたの仮説 (Custom Planet)",
+    solution: commitData?.q2_solution || "Your Challenger Solution",
+    targetPain: commitData?.q1_target_pain,
+    coreEdge: commitData?.q3_core_edge,
+    pullScore: overallScore,
+    frictionScore: nutritionMetrics.statusQuoGravity,
+    radius: 30,
+    commitId: commitId,
+    isUserIdea: true,
+  };
+
+  const gravityMapData: GravityMapData = {
+    genreId: `domain-${incumbentName.toLowerCase()}`,
+    genreName: targetGenreName,
+    coreJtbd: `Empower teams to execute ${targetGenreName} workflows with zero friction`,
+    companies: defaultCompetitorList,
+    customPlanet,
+  };
+
   const shareToken = commitData?.share_token;
   const shareUrl = shareToken
     ? `${typeof window !== "undefined" ? window.location.origin : ""}/share/${shareToken}`
@@ -229,161 +327,225 @@ export default function ValidationResultPage() {
           </div>
         </div>
 
-        {/* 2カラムレイアウト: VS Card Board & Emotional Nutrition Facts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* 左側: VS Card Board */}
-          <div className="lg:col-span-2 space-y-6">
-            <VSCardBoard
-              ideaTitle={commitData?.q2_solution?.slice(0, 35) || "Your Challenger Solution"}
-              competitorName={competitorProfile.incumbentName}
-              competitorTagline={competitorProfile.phDetails?.tagline}
-              elementDiffs={scores?.elementDiffs || {}}
-              overallScore={overallScore}
-            />
+        {/* 視点切替タブ (Crash Report VS Gravity Map) */}
+        <div className="flex items-center space-x-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 w-fit">
+          <button
+            onClick={() => setActiveViewTab("crash_report")}
+            className={`flex items-center space-x-2 px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeViewTab === "crash_report"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            <span>3x Penalty & Autopsy Report</span>
+          </button>
+          <button
+            onClick={() => setActiveViewTab("gravity_map")}
+            className={`flex items-center space-x-2 px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeViewTab === "gravity_map"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Compass className="w-4 h-4" />
+            <span>🪐 Market Gravity Topology (Custom Planet)</span>
+          </button>
+        </div>
 
-            {/* 死骸報告書 (GitHub Autopsy List) */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        {/* ========================================================================= */}
+        {/* VIEW 1: 3x PENALTY & AUTOPSY CRASH REPORT */}
+        {/* ========================================================================= */}
+        {activeViewTab === "crash_report" && (
+          <div className="space-y-8 animate-in fade-in duration-300">
+            {/* 2カラムレイアウト: VS Card Board & Emotional Nutrition Facts */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* 左側: VS Card Board */}
+              <div className="lg:col-span-2 space-y-6">
+                <VSCardBoard
+                  ideaTitle={commitData?.q2_solution?.slice(0, 35) || "Your Challenger Solution"}
+                  competitorName={competitorProfile.incumbentName}
+                  competitorTagline={competitorProfile.phDetails?.tagline}
+                  elementDiffs={scores?.elementDiffs || {}}
+                  overallScore={overallScore}
+                />
+
+                {/* 死骸報告書 (GitHub Autopsy List) */}
+                <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div className="flex items-center space-x-2">
+                      <Skull className="w-5 h-5 text-rose-400" />
+                      <h3 className="font-bold text-sm text-slate-100">
+                        GitHub 死骸報告書 (Autopsy: 類似の放棄リポジトリ)
+                      </h3>
+                    </div>
+                    <span className="text-xs font-mono text-rose-400">
+                      {githubAutopsy.totalCount || githubAutopsy.items?.length || 0} Archived Repos Found
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-400">
+                    過去に同じアイデアを試みてスターを集めたものの、更新が停止しアーカイブされたプロジェクトです。彼らが何につまずいたかを分析して回避策を講じてください。
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                    {(githubAutopsy.items || []).slice(0, 4).map((repo: any) => (
+                      <div
+                        key={repo.id || repo.full_name}
+                        className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <a
+                            href={repo.html_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-bold text-indigo-300 hover:underline flex items-center space-x-1 truncate"
+                          >
+                            <span className="truncate">{repo.name || repo.full_name}</span>
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                          </a>
+                          <span className="font-mono text-[10px] text-amber-400">★ {repo.stargazers_count}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 line-clamp-2">
+                          {repo.description || "No description provided."}
+                        </p>
+                        <div className="text-[10px] font-mono text-slate-500">
+                          Last Pushed: {repo.pushed_at ? new Date(repo.pushed_at).toLocaleDateString() : "Archived"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 右側: 感情の成分表示 (Nutrition Facts) */}
+              <div className="lg:col-span-1 flex flex-col items-center">
+                <EmotionalNutritionLabel metrics={nutritionMetrics} overallScore={overallScore} />
+              </div>
+            </div>
+
+            {/* 3人の懐疑的ペルソナ審査員フィードバック & ソクラテス式ツッコミ */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <Skull className="w-5 h-5 text-rose-400" />
-                  <h3 className="font-bold text-sm text-slate-100">
-                    GitHub 死骸報告書 (Autopsy: 類似の放棄リポジトリ)
+                  <UserCheck className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">
+                    Skeptical Personas & Socratic Guidance (冷徹な3人の審査員と対話型ツッコミ)
                   </h3>
                 </div>
-                <span className="text-xs font-mono text-rose-400">
-                  {githubAutopsy.totalCount || githubAutopsy.items?.length || 0} Archived Repos Found
+                <span className="text-xs text-slate-400 flex items-center space-x-1">
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>Grounding Transparency Active</span>
                 </span>
               </div>
 
-              <p className="text-xs text-slate-400">
-                過去に同じアイデアを試みてスターを集めたものの、更新が停止しアーカイブされたプロジェクトです。彼らが何につまずいたかを分析して回避策を講じてください。
-              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {personas.map((p: any, idx: number) => {
+                  const confidence = p.groundingConfidence || "HIGH";
+                  const sourcesCount = p.groundingSourcesCount || 5;
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                {(githubAutopsy.items || []).slice(0, 4).map((repo: any) => (
-                  <div
-                    key={repo.id || repo.full_name}
-                    className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-2 hover:border-slate-700 transition"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <a
-                        href={repo.html_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-bold text-indigo-300 hover:underline flex items-center space-x-1 truncate"
-                      >
-                        <span className="truncate">{repo.name || repo.full_name}</span>
-                        <ExternalLink className="w-3 h-3 shrink-0" />
-                      </a>
-                      <span className="font-mono text-[10px] text-amber-400">★ {repo.stargazers_count}</span>
+                  return (
+                    <div
+                      key={idx}
+                      className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl space-y-4 shadow-xl flex flex-col justify-between"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-bold text-sm text-slate-100">{p.name}</h4>
+                            <p className="text-[11px] text-slate-400">{p.title}</p>
+                          </div>
+                          <span
+                            className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border uppercase ${
+                              p.verdict === "CRITICAL"
+                                ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                                : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                            }`}
+                          >
+                            {p.verdict}
+                          </span>
+                        </div>
+
+                        {/* 4-1. 不確実性の開示 (Transparency Metric) */}
+                        <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950 rounded-xl border border-slate-800 text-[10px] font-mono">
+                          <span className="text-slate-400">Grounding Confidence:</span>
+                          <div className="flex items-center space-x-1 text-amber-400">
+                            <Star className="w-3 h-3 fill-amber-400" />
+                            <span>{confidence} ({sourcesCount} sources)</span>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-300 italic leading-relaxed">
+                          "{p.coreCritique}"
+                        </p>
+
+                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs space-y-1">
+                          <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
+                            Fatal Vulnerability (致命的欠陥)
+                          </span>
+                          <p className="text-[11px] text-rose-200">{p.fatalFlaw}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                        <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
+                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
+                            Recommended Countermeasure
+                          </span>
+                          <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
+                        </div>
+
+                        {/* 4-2. 対話型ツッコミUI (Socratic Dialogue Prompt) */}
+                        {p.socraticQuestion && (
+                          <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-xs space-y-1 animate-in fade-in">
+                            <div className="flex items-center space-x-1.5 text-purple-300 font-bold text-[10px] uppercase tracking-wider">
+                              <Lightbulb className="w-3.5 h-3.5 text-purple-400" />
+                              <span>Socratic Challenge (思考の足場)</span>
+                            </div>
+                            <p className="text-[11px] text-purple-200 italic">
+                              "{p.socraticQuestion}"
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-400 line-clamp-2">
-                      {repo.description || "No description provided."}
-                    </p>
-                    <div className="text-[10px] font-mono text-slate-500">
-                      Last Pushed: {repo.pushed_at ? new Date(repo.pushed_at).toLocaleDateString() : "Archived"}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
+        )}
 
-          {/* 右側: 感情の成分表示 (Nutrition Facts) */}
-          <div className="lg:col-span-1 flex flex-col items-center">
-            <EmotionalNutritionLabel metrics={nutritionMetrics} overallScore={overallScore} />
-          </div>
-        </div>
-
-        {/* 3人の懐疑的ペルソナ審査員フィードバック & ソクラテス式ツッコミ */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <UserCheck className="w-5 h-5 text-indigo-400" />
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">
-                Skeptical Personas & Socratic Guidance (冷徹な3人の審査員と対話型ツッコミ)
-              </h3>
-            </div>
-            <span className="text-xs text-slate-400 flex items-center space-x-1">
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span>Grounding Transparency Active</span>
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {personas.map((p: any, idx: number) => {
-              const confidence = p.groundingConfidence || "HIGH";
-              const sourcesCount = p.groundingSourcesCount || 5;
-
-              return (
-                <div
-                  key={idx}
-                  className="p-6 bg-slate-900/90 border border-slate-800 rounded-3xl space-y-4 shadow-xl flex flex-col justify-between"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-100">{p.name}</h4>
-                        <p className="text-[11px] text-slate-400">{p.title}</p>
-                      </div>
-                      <span
-                        className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border uppercase ${
-                          p.verdict === "CRITICAL"
-                            ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
-                            : "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                        }`}
-                      >
-                        {p.verdict}
-                      </span>
-                    </div>
-
-                    {/* 4-1. 不確実性の開示 (Transparency Metric) */}
-                    <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950 rounded-xl border border-slate-800 text-[10px] font-mono">
-                      <span className="text-slate-400">Grounding Confidence:</span>
-                      <div className="flex items-center space-x-1 text-amber-400">
-                        <Star className="w-3 h-3 fill-amber-400" />
-                        <span>{confidence} ({sourcesCount} sources)</span>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-slate-300 italic leading-relaxed">
-                      "{p.coreCritique}"
-                    </p>
-
-                    <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs space-y-1">
-                      <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
-                        Fatal Vulnerability (致命的欠陥)
-                      </span>
-                      <p className="text-[11px] text-rose-200">{p.fatalFlaw}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                    <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
-                      <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
-                        Recommended Countermeasure
-                      </span>
-                      <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
-                    </div>
-
-                    {/* 4-2. 対話型ツッコミUI (Socratic Dialogue Prompt) */}
-                    {p.socraticQuestion && (
-                      <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-xs space-y-1 animate-in fade-in">
-                        <div className="flex items-center space-x-1.5 text-purple-300 font-bold text-[10px] uppercase tracking-wider">
-                          <Lightbulb className="w-3.5 h-3.5 text-purple-400" />
-                          <span>Socratic Challenge (思考の足場)</span>
-                        </div>
-                        <p className="text-[11px] text-purple-200 italic">
-                          "{p.socraticQuestion}"
-                        </p>
-                      </div>
-                    )}
-                  </div>
+        {/* ========================================================================= */}
+        {/* VIEW 2: 🪐 MARKET GRAVITY TOPOLOGY (CUSTOM PLANET PLACEMENT) */}
+        {/* ========================================================================= */}
+        {activeViewTab === "gravity_map" && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            {/* トポロジー案内バナー */}
+            <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-xs font-bold text-amber-300">
+                  <span className="text-base">🪐</span>
+                  <span>Custom Planet Synthetic Gravity Placement</span>
                 </div>
-              );
-            })}
+                <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-lg font-mono text-[10px]">
+                  Target Sector: {targetGenreName}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                あなたのアイデアが、標的市場（{targetGenreName}）の重力場上に「<strong className="text-amber-300">🪐 Custom Planet</strong>」として自動合成配置されました。中心のCore JTBD星や競合（{incumbentName}等）の引力・摩擦とあなたの距離を視覚的に把握し、クレーター（市場の穴）方向へのピボット戦略を練ることができます。
+              </p>
+            </div>
+
+            {/* D3 重力マップ可視化コンポーネント (Custom Planet 流し込み) */}
+            <GravityMapVisualizer
+              data={gravityMapData}
+              customPlanet={customPlanet}
+              width={1100}
+              height={620}
+            />
           </div>
-        </div>
+        )}
       </main>
 
       {/* ========================================================================= */}

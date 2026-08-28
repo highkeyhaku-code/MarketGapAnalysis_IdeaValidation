@@ -19,32 +19,12 @@ import {
 import { TheGarageKanban } from "../components/TheGarageKanban";
 import { JobPollingTracker } from "../components/JobPollingTracker";
 import { GravityMapVisualizer, GravityMapData } from "../components/GravityMapVisualizer";
-
-const POPULAR_GENRES = [
-  {
-    id: "genre-pm",
-    name: "Project Management & Workflow Automation",
-    desc: "Notion, Linear, Asana, Monday.com, ClickUp",
-    frictionRate: "78% config friction",
-  },
-  {
-    id: "genre-crm",
-    name: "B2B Sales CRM & Lead Intelligence",
-    desc: "HubSpot, Salesforce, Attio, Folk, Pipedrive",
-    frictionRate: "84% pricing & setup overhead",
-  },
-  {
-    id: "genre-devtools",
-    name: "Developer Infrastructure & AI Code Tools",
-    desc: "GitHub, GitLab, Supabase, Vercel, Cursor",
-    frictionRate: "62% learning curve",
-  },
-];
+import { MarketGenreDirectory } from "../components/MarketGenreDirectory";
 
 export default function GarageDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"kanban" | "discover" | "validate">("kanban");
-  const [selectedGenre, setSelectedGenre] = useState(POPULAR_GENRES[0].name);
+  const [selectedGenre, setSelectedGenre] = useState("Project Management & Workflow Automation");
   const [customKeyword, setCustomKeyword] = useState("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [analyzingGenreName, setAnalyzingGenreName] = useState<string>("");
@@ -52,17 +32,19 @@ export default function GarageDashboard() {
   const [isTriggering, setIsTriggering] = useState(false);
 
   // 探索ジョブの開始
-  const handleStartDiscovery = async (genreNameToAnalyze: string) => {
+  const handleStartDiscovery = async (genreNameToAnalyze: string, genreId?: string) => {
     try {
       setIsTriggering(true);
       setMapResult(null);
       setAnalyzingGenreName(genreNameToAnalyze);
+      setSelectedGenre(genreNameToAnalyze);
 
       const res = await fetch("/api/market/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           genreName: genreNameToAnalyze,
+          genreId: genreId || undefined,
         }),
       });
 
@@ -215,40 +197,12 @@ export default function GarageDashboard() {
               </div>
             </div>
 
-            {/* おすすめのプリセットジャンル */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
-                <Layers className="w-4 h-4 text-indigo-400" />
-                <span>Featured Target Markets (プリセット市場)</span>
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {POPULAR_GENRES.map((g) => (
-                  <div
-                    key={g.id}
-                    onClick={() => {
-                      setSelectedGenre(g.name);
-                      handleStartDiscovery(g.name);
-                    }}
-                    className={`p-5 rounded-2xl border transition cursor-pointer group relative overflow-hidden ${
-                      selectedGenre === g.name
-                        ? "bg-slate-900/90 border-indigo-500/60 shadow-lg shadow-indigo-500/10"
-                        : "bg-slate-900/40 border-slate-800/80 hover:bg-slate-900/70 hover:border-slate-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between text-xs mb-2">
-                      <span className="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-md font-mono text-[10px]">
-                        {g.frictionRate}
-                      </span>
-                      <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition" />
-                    </div>
-                    <h4 className="font-bold text-sm text-slate-200 group-hover:text-indigo-300 transition">
-                      {g.name}
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-1 line-clamp-1">{g.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* 市場ジャンル辞書ディレクトリー (Serendipity Seeker) */}
+            <MarketGenreDirectory
+              onSelectGenre={(name, id) => handleStartDiscovery(name, id)}
+              selectedGenreName={selectedGenre}
+              isAnalyzing={isTriggering || Boolean(activeJobId && !mapResult)}
+            />
 
             {/* 非同期ジョブ進捗トラッカー */}
             {activeJobId && !mapResult && (

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../lib/supabaseClient";
+import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../lib/supabaseClient";
 
 /**
  * アイデア & コミット一覧取得 API
@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const userId = body.userId || crypto.randomUUID();
+    const userId = await getDefaultOrAuthUserId(body.userId);
     const title = body.title || "新規仮説ドラフト";
     const ideaId = crypto.randomUUID();
     const commitId = crypto.randomUUID();

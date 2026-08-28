@@ -4,32 +4,17 @@ import { fetchProductHuntDetails, ProductHuntAppDetails } from "../../lib/api/pr
 import { fetchFrictionCorpusFromTavily } from "../../lib/api/tavily";
 import { compressFrictionCorpus } from "../../lib/compressFrictionCorpus";
 import { evaluateMarketBatch, MarketEvaluationResult, CompanyMarketInput } from "../../lib/ai/evaluateMarket";
+import { evaluateDeltaSyncPipeline, DeltaSyncDecision } from "../../lib/deltaSync";
+import { resolveTopCompaniesViaBorda } from "../../lib/borda";
 import { Json } from "../../types/database";
 
 /**
- * ジャンル名に基づいたシード候補企業名リストの取得
- */
-function getSeedCompaniesForGenre(genreName: string): string[] {
-  const normalized = genreName.toLowerCase();
-  if (normalized.includes("project") || normalized.includes("task") || normalized.includes("management")) {
-    return ["Notion", "Linear", "Asana", "Monday.com", "ClickUp", "Trello"];
-  }
-  if (normalized.includes("crm") || normalized.includes("sales")) {
-    return ["HubSpot", "Salesforce", "Pipedrive", "Attio", "Folk", "Close"];
-  }
-  if (normalized.includes("dev") || normalized.includes("code") || normalized.includes("git")) {
-    return ["GitHub", "GitLab", "Linear", "Vercel", "Supabase", "Cursor"];
-  }
-  // デフォルト
-  return ["Notion", "Linear", "HubSpot", "Airtable", "Framer", "Loom"];
-}
-
-/**
  * 非同期ジョブ: 市場分析＆重力マップ構築 (analyzeMarketAndBuildMap)
+ * - 設計書 2.3 準拠: 時間正規化差分更新 (Delta Sync) による LLM 実行制御 (Level 1/2/3)
+ * - 設計書 2.7 準拠: Supabase calculate_borda_top10 RPC による上位10社数理選定
  * - 429レート制限対策: concurrency limit = 12
  * - 自動リトライ: retries = 3 (指数バックオフ)
  * - フェイルソフト機構: Promise.allSettledで取得企業数5社未満ならリトライキューへ回す
- * - job_status テーブルを逐次更新
  */
 export const analyzeMarketAndBuildMap = inngest.createFunction(
   {
@@ -44,21 +29,49 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
   async ({ event, step }) => {
     const { jobId, genreId, genreName, userId } = event.data as AnalyzeMarketEventData;
 
-    // 3-1. 進捗の初期化: job_status を更新 (10%)
-    await step.run("initialize-job-status", async () => {
+    // 1. 進捗の初期化 & Delta Sync 差分判定 (10%)
+    const deltaDecision: DeltaSyncDecision = await step.run("check-delta-sync-pipeline", async () => {
       await supabaseAdmin.from("job_status").upsert({
         id: jobId,
         user_id: userId,
-        status: "🔎 Product Huntから最新のプロダクトデータをフェッチ中...",
+        status: "⏱️ 差分更新パイプライン (Delta Sync) の評価中...",
         percentage: 10,
         error_message: null,
       });
-      return { status: "initialized" };
+
+      const decision = await evaluateDeltaSyncPipeline(genreId, genreName);
+      return decision;
     });
 
-    // 3-2. データフェッチ: Task 1 の関数を使い、対象企業群のデータを取得 (Promise.allSettled フェイルソフト機構)
-    const rawFetchedData = await step.run("fetch-source-data-fail-soft", async () => {
-      const targetCompanies = getSeedCompaniesForGenre(genreName);
+    // 2. Level 1 または Level 2 で閾値未達の場合: LLMをスキップしてキャッシュを即時返却 (リソース保護)
+    if (!deltaDecision.shouldRunLlm && deltaDecision.cachedData) {
+      await step.run("return-cached-materialized-map", async () => {
+        await supabaseAdmin.from("job_status").update({
+          percentage: 100,
+          status: "COMPLETED",
+          result_data: deltaDecision.cachedData as unknown as Json,
+        }).eq("id", jobId);
+      });
+
+      return {
+        success: true,
+        isCacheHit: true,
+        level: deltaDecision.level,
+        reason: deltaDecision.reason,
+        result: deltaDecision.cachedData,
+      };
+    }
+
+    // 3. データフェッチ: Supabase Borda RPC で複数ソースの Top 10 社を数理算出し、データを取得 (40%)
+    const rawFetchedData = await step.run("fetch-source-data-via-borda-rpc", async () => {
+      await supabaseAdmin.from("job_status").update({
+        percentage: 30,
+        status: "📊 Bordaカウント(RPC)による上位10社の選定とデータ取得中...",
+      }).eq("id", jobId);
+
+      // 設計書 2.7 準拠: Supabase calculate_borda_top10 RPC 経由で合意形成 Top 10 社を決定
+      const { topCompanyNames } = await resolveTopCompaniesViaBorda(genreName);
+      const targetCompanies = topCompanyNames.slice(0, 8); // 上位6〜8社を対象に並列収集
 
       // 各企業のProduct HuntデータとTavily摩擦データを並列フェッチ
       const fetchTasks = targetCompanies.map(async (companyName) => {
@@ -91,11 +104,11 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
       return successfulItems;
     });
 
-    // 3-3. 進捗更新 & テキスト濃縮: job_status を更新 (40%)
+    // 4. 摩擦テキスト濃縮: job_status を更新 (55%)
     const compressedInputs: CompanyMarketInput[] = await step.run("detect-and-compress-frictions", async () => {
       await supabaseAdmin.from("job_status").update({
-        percentage: 40,
-        status: "💀 ユーザーの「不満（摩擦）」を検知中...",
+        percentage: 55,
+        status: "💀 ユーザーの「不満（摩擦）」を検知・濃縮中...",
       }).eq("id", jobId);
 
       // compressFrictionCorpus で摩擦キーワードを抽出し、上限3段落でテキストを濃縮
@@ -105,10 +118,10 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
       }));
     });
 
-    // 3-4. AI分析とスコア計算: Task 2 の関数を呼び出し、評価データとD3用スカラー値を算出 (75%)
+    // 5. AI分析とスコア計算: Gemini 3 Flash で市場重力マップを解析 (80%)
     const marketEvaluation: MarketEvaluationResult = await step.run("ai-evaluation-and-gravity-scoring", async () => {
       await supabaseAdmin.from("job_status").update({
-        percentage: 75,
+        percentage: 80,
         status: "🧠 AIによる市場重力マップとJTBDの解析中...",
       }).eq("id", jobId);
 
@@ -116,7 +129,7 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
       return evaluation;
     });
 
-    // 3-5. キャッシュ保存と完了: D3.js用の構造（Materialized JSON）に整形し、market_cache へ Upsert。job_status を COMPLETED に更新 (100%)
+    // 6. キャッシュ保存と完了: Materialized JSON を market_cache へ Upsert。job_status を COMPLETED に更新 (100%)
     const finalResult = await step.run("save-market-cache-and-complete", async () => {
       const materializedJson = {
         genreId: marketEvaluation.genreId,
@@ -149,6 +162,10 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
       };
     });
 
-    return { jobId, result: finalResult, marketEvaluation };
+    return {
+      success: true,
+      jobId,
+      result: finalResult,
+    };
   }
 );

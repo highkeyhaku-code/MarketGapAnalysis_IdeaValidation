@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseClient";
+import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../../lib/supabaseClient";
 import { inngest } from "../../../../inngest/client";
 import { IdeaInputSchema, DomainType } from "../../../../schemas/zod";
 import { Json } from "../../../../types/database";
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     // 1. Zod スキーマによる入力検証
     const validatedInput = IdeaInputSchema.parse(ideaInput);
 
-    const userId = providedUserId || crypto.randomUUID();
+    const userId = await getDefaultOrAuthUserId(providedUserId);
     let ideaId = providedIdeaId;
 
     // 2. アイデア親レコードが存在しない場合は新規作成
@@ -80,20 +80,24 @@ export async function POST(req: NextRequest) {
       console.error("[API /api/ideas/commit] Error creating job_status:", jobErr);
     }
 
-    // 5. Inngest ジョブを発火
-    await inngest.send({
-      name: "hypothesis/crash.requested",
-      data: {
-        jobId,
-        commitId,
-        ideaId,
-        userId,
-        domain: (domain as DomainType) || "B2B_SME",
-        targetPain: validatedInput.q1_target_pain,
-        solution: validatedInput.q2_solution,
-        coreEdge: validatedInput.q3_core_edge,
-      },
-    });
+    // 5. Inngest ジョブを発火 (開発環境などでInngestがオフラインでもフェイルソフトに処理)
+    try {
+      await inngest.send({
+        name: "hypothesis/crash.requested",
+        data: {
+          jobId,
+          commitId,
+          ideaId,
+          userId,
+          domain: (domain as DomainType) || "B2B_SME",
+          targetPain: validatedInput.q1_target_pain,
+          solution: validatedInput.q2_solution,
+          coreEdge: validatedInput.q3_core_edge,
+        },
+      });
+    } catch (inngestErr) {
+      console.warn("[API /api/ideas/commit] Inngest event send warning (offline fallback):", inngestErr);
+    }
 
     return NextResponse.json({
       success: true,

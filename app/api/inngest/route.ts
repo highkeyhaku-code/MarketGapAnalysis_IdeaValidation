@@ -2,6 +2,7 @@ import { serve } from "inngest/next";
 import { inngest } from "../../../inngest/client";
 import { analyzeMarketAndBuildMap } from "../../../inngest/functions/analyzeMarketAndBuildMap";
 import { runHypothesisCrashJob } from "../../../inngest/functions/runHypothesisCrashJob";
+import { evaluateSectorPercentilesCron } from "../../../inngest/functions/evaluateSectorPercentilesCron";
 
 /**
  * Inngest API Route Handler for Next.js App Router
@@ -12,5 +13,6 @@ export const { GET, POST, PUT } = serve({
   functions: [
     analyzeMarketAndBuildMap,
     runHypothesisCrashJob,
+    evaluateSectorPercentilesCron,
   ],
 });

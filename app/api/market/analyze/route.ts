@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "../../../../inngest/client";
-import { supabaseAdmin } from "../../../../lib/supabaseClient";
+import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../../lib/supabaseClient";
 
 /**
  * 市場分析ジョブ発火 API
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const genreName = body.genreName || "Project Management & Task Automation";
     const genreId = body.genreId || crypto.randomUUID();
-    const userId = body.userId || crypto.randomUUID();
+    const userId = await getDefaultOrAuthUserId(body.userId);
     const jobId = crypto.randomUUID();
 
     // 1. 初期ステータスを Supabase に登録
@@ -30,16 +30,20 @@ export async function POST(req: NextRequest) {
       throw new Error(`Failed to initialize job status in database: ${dbErr.message}`);
     }
 
-    // 2. Inngest イベントを発行して非同期ジョブを起動
-    await inngest.send({
-      name: "market/analyze.requested",
-      data: {
-        jobId,
-        genreId,
-        genreName,
-        userId,
-      },
-    });
+    // 2. Inngest イベントを発行して非同期ジョブを起動 (オフライン時もフェイルソフト)
+    try {
+      await inngest.send({
+        name: "market/analyze.requested",
+        data: {
+          jobId,
+          genreId,
+          genreName,
+          userId,
+        },
+      });
+    } catch (inngestErr) {
+      console.warn("[API /api/market/analyze] Inngest event send warning (offline fallback):", inngestErr);
+    }
 
     return NextResponse.json({
       success: true,
