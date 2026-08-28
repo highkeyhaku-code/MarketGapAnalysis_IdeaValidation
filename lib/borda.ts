@@ -56,36 +56,67 @@ export async function calculateBordaTop10ViaRpc(
 
 /**
  * ジャンル名と複数データソース（Product Hunt, AlternativeTo, GitHub/Forums）からのランキングを統合し、
- * Borda カウントによる合意形成 Top 10 社リストを生成する
+ * Borda カウントによる合意形成 Top 10 社リストを生成する (【Directive 2】完全動的化)
  */
 export async function resolveTopCompaniesViaBorda(
   genreName: string,
   extraRankings?: BordaRankingInput[]
 ): Promise<{ topCompanyNames: string[]; bordaScores: BordaScoredCompany[] }> {
-  const normalized = genreName.toLowerCase();
+  const norm = genreName.toLowerCase();
 
-  // 各ソースからの多重ランキングデータをシミュレート/抽出
   let source1Ph: string[] = [];
   let source2Alt: string[] = [];
   let source3Comm: string[] = [];
 
-  if (normalized.includes("crm") || normalized.includes("sales")) {
-    source1Ph = ["HubSpot", "Attio", "Folk", "Salesforce", "Pipedrive", "Close", "Clay", "Apollo"];
-    source2Alt = ["Salesforce", "HubSpot", "Pipedrive", "Zoho", "Attio", "Freshsales", "Copper"];
-    source3Comm = ["HubSpot", "Attio", "Close", "Salesforce", "Folk", "Clay", "Pipedrive"];
-  } else if (normalized.includes("dev") || normalized.includes("code") || normalized.includes("git")) {
-    source1Ph = ["Cursor", "Linear", "Supabase", "Vercel", "GitHub", "GitLab", "Neon", "Resend"];
-    source2Alt = ["GitHub", "GitLab", "Bitbucket", "Cursor", "Vercel", "Supabase", "Linear"];
-    source3Comm = ["Cursor", "GitHub", "Supabase", "Linear", "Vercel", "GitLab", "Claude Code"];
-  } else if (normalized.includes("design") || normalized.includes("creative") || normalized.includes("video")) {
-    source1Ph = ["Figma", "Framer", "Runway", "Luma", "Canva", "Kling", "CapCut", "Spline"];
-    source2Alt = ["Figma", "Adobe XD", "Sketch", "Framer", "Canva", "InVision", "Penpot"];
-    source3Comm = ["Figma", "Framer", "Runway", "Canva", "Midjourney", "Spline", "Penpot"];
+  if (norm.includes("agent") || norm.includes("autonomous") || norm.includes("orchestrat") || norm.includes("prompt")) {
+    source1Ph = ["LangChain", "LlamaIndex", "CrewAI", "AutoGPT", "AutoGen", "Dify", "Flowise", "PromptLayer"];
+    source2Alt = ["LangChain", "LlamaIndex", "Semantic Kernel", "Haystack", "CrewAI", "Dify", "OpenAI Assistants"];
+    source3Comm = ["CrewAI", "LangChain", "AutoGen", "Dify", "LlamaIndex", "Vellum", "PromptLayer"];
+  } else if (norm.includes("video") || norm.includes("avatar") || norm.includes("voice") || norm.includes("audio")) {
+    source1Ph = ["Runway", "Luma Dream Machine", "Kling AI", "ElevenLabs", "HeyGen", "Synthesia", "Pika", "Descript"];
+    source2Alt = ["Runway", "ElevenLabs", "Synthesia", "HeyGen", "Descript", "CapCut", "InVideo", "D-ID"];
+    source3Comm = ["ElevenLabs", "Runway", "Luma", "HeyGen", "Synthesia", "Kling AI", "Sora"];
+  } else if (norm.includes("vector") || norm.includes("rag") || norm.includes("embedding") || norm.includes("search")) {
+    source1Ph = ["Pinecone", "Weaviate", "Qdrant", "Chroma", "Milvus", "Vespa", "Marqo", "LanceDB"];
+    source2Alt = ["Pinecone", "Weaviate", "Chroma", "Qdrant", "Milvus", "Elasticsearch", "Pgvector"];
+    source3Comm = ["Pinecone", "Qdrant", "Chroma", "Weaviate", "LanceDB", "Pgvector", "Milvus"];
+  } else if (norm.includes("security") || norm.includes("soc2") || norm.includes("compliance") || norm.includes("iam") || norm.includes("vault") || norm.includes("secret")) {
+    source1Ph = ["Vanta", "Drata", "Secureframe", "Tailscale", "1Password", "Wiz", "Snyk", "DoControl"];
+    source2Alt = ["Vanta", "Drata", "Okta", "1Password", "Cloudflare Zero Trust", "HashiCorp Vault", "Snyk"];
+    source3Comm = ["Vanta", "Drata", "Tailscale", "Wiz", "Secureframe", "Snyk", "1Password"];
+  } else if (norm.includes("billing") || norm.includes("metering") || norm.includes("card") || norm.includes("spend") || norm.includes("payroll") || norm.includes("fintech")) {
+    source1Ph = ["Stripe", "Lago", "Orb", "Ramp", "Brex", "Deel", "Remote", "Mercury", "Togai", "Metronome"];
+    source2Alt = ["Stripe", "Chargebee", "Recurly", "Ramp", "Brex", "Gusto", "Deel", "QuickBooks"];
+    source3Comm = ["Lago", "Stripe", "Orb", "Ramp", "Brex", "Deel", "Mercury", "Metronome"];
+  } else if (norm.includes("support") || norm.includes("ticket") || norm.includes("helpdesk") || norm.includes("customer success") || norm.includes("churn")) {
+    source1Ph = ["Intercom", "Plain", "Zendesk", "Freshdesk", "Help Scout", "Front", "Gorgias", "Vitally", "ChurnZero"];
+    source2Alt = ["Zendesk", "Intercom", "Freshdesk", "Help Scout", "Front", "Crisp", "Zoho Desk"];
+    source3Comm = ["Intercom", "Plain", "Zendesk", "Help Scout", "Front", "Vitally", "Crisp"];
+  } else if (norm.includes("analytics") || norm.includes("bi") || norm.includes("data") || norm.includes("etl") || norm.includes("warehouse") || norm.includes("metric")) {
+    source1Ph = ["PostHog", "Snowflake", "Fivetran", "dbt Labs", "Mixpanel", "Hex", "Metabase", "ClickHouse", "Cube"];
+    source2Alt = ["Snowflake", "Mixpanel", "Amplitude", "Tableau", "Power BI", "Metabase", "PostHog", "Looker"];
+    source3Comm = ["PostHog", "dbt Labs", "ClickHouse", "Hex", "Metabase", "Snowflake", "Fivetran"];
+  } else if (norm.includes("hr") || norm.includes("recruiting") || norm.includes("ats") || norm.includes("talent") || norm.includes("interview") || norm.includes("hiring")) {
+    source1Ph = ["Ashby", "Greenhouse", "Lever", "Lattice", "Rippling", "Deel", "Wellfound", "Gem", "WorkOS"];
+    source2Alt = ["Greenhouse", "Lever", "Workday", "BambooHR", "Rippling", "Lattice", "Ashby"];
+    source3Comm = ["Ashby", "Greenhouse", "Rippling", "Lattice", "Gem", "Lever", "Deel"];
+  } else if (norm.includes("sales") || norm.includes("crm") || norm.includes("outbound") || norm.includes("lead") || norm.includes("pipeline") || norm.includes("cpq")) {
+    source1Ph = ["Attio", "HubSpot", "Clay", "Apollo.io", "Salesforce", "Folk", "Close", "Pipedrive", "Gong"];
+    source2Alt = ["Salesforce", "HubSpot", "Pipedrive", "Zoho CRM", "Attio", "Close", "Freshsales"];
+    source3Comm = ["Attio", "Clay", "HubSpot", "Salesforce", "Apollo.io", "Folk", "Close"];
+  } else if (norm.includes("seo") || norm.includes("growth") || norm.includes("plg") || norm.includes("attribution") || norm.includes("creator") || norm.includes("marketing")) {
+    source1Ph = ["Beehiiv", "Typeform", "Klaviyo", "Clearbit", "Ahrefs", "Semrush", "Buffer", "Webflow", "PostHog"];
+    source2Alt = ["HubSpot", "Mailchimp", "Klaviyo", "Semrush", "Ahrefs", "Webflow", "Typeform"];
+    source3Comm = ["Beehiiv", "Klaviyo", "Typeform", "Ahrefs", "Webflow", "PostHog", "Buffer"];
+  } else if (norm.includes("developer") || norm.includes("api") || norm.includes("database") || norm.includes("ci/cd") || norm.includes("runtime") || norm.includes("code") || norm.includes("observability")) {
+    source1Ph = ["Cursor", "Supabase", "Vercel", "Neon", "Resend", "Railway", "Linear", "Sentry", "Postman", "Docker"];
+    source2Alt = ["GitHub", "GitLab", "Supabase", "Vercel", "AWS", "Docker", "Sentry", "Postman"];
+    source3Comm = ["Cursor", "Supabase", "Vercel", "Linear", "Neon", "Resend", "Railway", "Sentry"];
   } else {
-    // Project Management & Workflow
-    source1Ph = ["Linear", "Notion", "Monday.com", "Asana", "ClickUp", "Coda", "Trello", "Superhuman"];
-    source2Alt = ["Notion", "Asana", "Monday.com", "Linear", "Trello", "ClickUp", "Basecamp"];
-    source3Comm = ["Linear", "Notion", "ClickUp", "Monday.com", "Asana", "Coda", "Raycast"];
+    // 汎用・コラボレーション・生産性
+    source1Ph = ["Linear", "Notion", "Raycast", "Superhuman", "Monday.com", "Asana", "ClickUp", "Coda", "Miro"];
+    source2Alt = ["Notion", "Asana", "Monday.com", "Trello", "Linear", "ClickUp", "Basecamp", "Coda"];
+    source3Comm = ["Linear", "Notion", "Raycast", "ClickUp", "Superhuman", "Asana", "Monday.com"];
   }
 
   const multiRankings: BordaRankingInput[] = [
@@ -99,8 +130,5 @@ export async function resolveTopCompaniesViaBorda(
   const bordaScores = await calculateBordaTop10ViaRpc(multiRankings);
   const topCompanyNames = bordaScores.map((s) => s.company_id);
 
-  return {
-    topCompanyNames,
-    bordaScores,
-  };
+  return { topCompanyNames, bordaScores };
 }

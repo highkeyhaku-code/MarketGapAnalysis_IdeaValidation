@@ -31,11 +31,15 @@ export default function GarageDashboard() {
   const [mapResult, setMapResult] = useState<GravityMapData | null>(null);
   const [isTriggering, setIsTriggering] = useState(false);
 
-  // 探索ジョブの開始
+  // 探索ジョブの開始 & 専用マップ画面への遷移
   const handleStartDiscovery = async (genreNameToAnalyze: string, genreId?: string) => {
+    if (genreId) {
+      router.push(`/map/${genreId}`);
+      return;
+    }
+
     try {
       setIsTriggering(true);
-      setMapResult(null);
       setAnalyzingGenreName(genreNameToAnalyze);
       setSelectedGenre(genreNameToAnalyze);
 
@@ -44,12 +48,13 @@ export default function GarageDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           genreName: genreNameToAnalyze,
-          genreId: genreId || undefined,
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.jobId) {
+      if (data.success && data.genreId) {
+        router.push(`/map/${data.genreId}`);
+      } else if (data.success && data.jobId) {
         setActiveJobId(data.jobId);
       } else {
         alert(`Failed to start job: ${data.error || "Unknown error"}`);
@@ -61,17 +66,10 @@ export default function GarageDashboard() {
     }
   };
 
-  // ジョブ完了時のハンドラ
+  // ジョブ完了時のハンドラ (専用画面へ遷移)
   const handleJobComplete = (resultData: any) => {
-    if (resultData && resultData.companies) {
-      setMapResult(resultData as GravityMapData);
-    } else {
-      setMapResult({
-        genreId: "cached-genre",
-        genreName: analyzingGenreName || selectedGenre,
-        coreJtbd: `Empower teams to execute ${analyzingGenreName || selectedGenre} with zero friction`,
-        companies: [],
-      });
+    if (resultData && resultData.genreId) {
+      router.push(`/map/${resultData.genreId}`);
     }
   };
 
@@ -183,34 +181,13 @@ export default function GarageDashboard() {
             />
 
             {/* 非同期ジョブ進捗トラッカー */}
-            {activeJobId && !mapResult && (
+            {activeJobId && (
               <div className="pt-4 animate-in fade-in duration-300">
                 <JobPollingTracker
                   jobId={activeJobId}
                   onComplete={handleJobComplete}
                   onError={(err) => console.error("Job failed:", err)}
                 />
-              </div>
-            )}
-
-            {/* D3 重力マップ可視化エリア */}
-            {mapResult && (
-              <div className="space-y-4 animate-in fade-in duration-500">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 text-emerald-400 text-xs font-semibold">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Analysis Complete: {mapResult.companies.length} Competitors Topology Mapped</span>
-                  </div>
-                  <button
-                    onClick={() => handleStartDiscovery(mapResult.genreName)}
-                    className="flex items-center space-x-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-xl border border-indigo-500/30 transition"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Re-analyze</span>
-                  </button>
-                </div>
-
-                <GravityMapVisualizer data={mapResult} width={1000} height={580} />
               </div>
             )}
           </div>

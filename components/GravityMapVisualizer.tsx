@@ -86,16 +86,21 @@ interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
 
 /**
  * D3.js 物理演算ベース重力マップ描画コンポーネント (GravityMapVisualizer)
- * - Directive 2: Geminiが抽出した3〜5つのJTBDをそれぞれ独立した星として中央円周上に動的配置
- * - Directive 3: 惑星の実スコア（Pull/Friction）バインドおよび「AI推論・根拠（Score Justification）」の表示
- * - 設計書 4.2: クレーター（三日月欠損）＆赤く波打つテンションライン（Friction Waves）
- * - 設計書 4.4: What-If カードのオンデマンド遅延生成
+ * - Directive 2: 選択市場に合わせた完全動的データバインディング
+ * - Directive 3: 
+ *   - Pull Score に比例した惑星半径の動的計算 (16px 〜 44px)
+ *   - Friction Score / Intensity に比例したクレーター切削面積と深さの動的レンダリング
+ *   - 複数 JTBD 星（3〜5個）の中央円周上への動的配置
+ * - Directive 4: 
+ *   - クリックされたノードの実データ完全バインド
+ *   - AI スコア推論・根拠 (Score Justification) の表示
+ *   - マップ背景クリックによるインスペクターのクローズ (Outside Click Dismiss)
  */
 export function GravityMapVisualizer({
   data,
   customPlanet: overrideCustomPlanet,
-  width = 900,
-  height = 560,
+  width = 1000,
+  height = 600,
   onPivotToCrater,
 }: GravityMapVisualizerProps) {
   const router = useRouter();
@@ -154,28 +159,28 @@ export function GravityMapVisualizer({
     const companies = data.companies || [];
 
     // =========================================================================
-    // 1. 【Directive 2】動的・複数 JTBD 星の配置 (3〜5つの JTBD 星)
+    // 1. 【Directive 3】動的・複数 JTBD 星の配置 (3〜5つの JTBD 星)
     // =========================================================================
     const rawJtbds = data.subJtbds && data.subJtbds.length > 0
       ? data.subJtbds
       : [
           data.coreJtbd || `Core: ${data.genreName}`,
           `0-Config & Fast Setup`,
-          `High Performance & Speed`,
-          `Ecosystem & Integrations`,
+          `High Speed & Performance`,
+          `Seamless Integration Hub`,
         ];
 
-    const jtbdStars: SimulationNode[] = rawJtbds.map((jtbdText, idx) => {
-      const starCount = rawJtbds.length;
-      const angle = (idx / starCount) * 2 * Math.PI - Math.PI / 2;
-      const starOrbitRadius = starCount === 1 ? 0 : 80;
+    const starCount = rawJtbds.length;
+    const starOrbitRadius = starCount === 1 ? 0 : 85;
 
+    const jtbdStars: SimulationNode[] = rawJtbds.map((jtbdText, idx) => {
+      const angle = (idx / starCount) * 2 * Math.PI - Math.PI / 2;
       return {
         id: `jtbd-star-${idx}`,
         type: "star",
         name: jtbdText,
-        radius: starCount === 1 ? 44 : 28,
-        color: idx === 0 ? "#6366f1" : "#818cf8", // プライマリ星: Indigo, サブ星: Light Indigo
+        radius: idx === 0 ? 34 : 26,
+        color: idx === 0 ? "#6366f1" : "#818cf8",
         fx: width / 2 + Math.cos(angle) * starOrbitRadius,
         fy: height / 2 + Math.sin(angle) * starOrbitRadius,
       };
@@ -184,15 +189,21 @@ export function GravityMapVisualizer({
     const primaryStar = jtbdStars[0];
 
     // =========================================================================
-    // 2. 競合企業惑星 (Competitor Planets)
+    // 2. 【Directive 3】競合企業惑星のサイズ動的計算 (Pull/Friction 比例)
     // =========================================================================
     const planetNodes: SimulationNode[] = companies.map((c, i) => {
+      const pull = Math.max(10, Math.min(100, c.pullScore || 50));
+      const frict = Math.max(10, Math.min(100, c.frictionScore || 50));
+
+      // 【動的計算】Pull Score (10〜100) に比例して半径を 16px 〜 44px に決定
+      const dynamicRadius = Math.round(16 + (pull / 100) * 28);
+
       const angle = (i / Math.max(1, companies.length)) * 2 * Math.PI;
-      const dist = 180 + (100 - (c.pullScore || 50)) * 1.5;
-      const hue = Math.max(10, 240 - (c.frictionScore || 50) * 2.2);
+      const dist = 180 + (100 - pull) * 1.5;
+      const hue = Math.max(10, 240 - frict * 2.2);
       const color = `hsl(${hue}, 85%, 60%)`;
-      const isTensionOverload = (c.frictionScore || 0) > (c.pullScore || 0) || (c.frictionScore || 0) >= 70;
-      const hasCrater = (c.frictionScore || 0) >= 50 || (c.intensity || 0) >= 6;
+      const isTensionOverload = frict > pull || frict >= 70;
+      const hasCrater = frict >= 45 || (c.intensity || 0) >= 5;
 
       return {
         id: c.companyId || `comp-${i}`,
@@ -201,10 +212,10 @@ export function GravityMapVisualizer({
         tagline: c.tagline,
         description: c.description,
         homepageUrl: c.homepageUrl,
-        pullScore: c.pullScore,
-        frictionScore: c.frictionScore,
-        intensity: c.intensity,
-        radius: c.radius || 26,
+        pullScore: pull,
+        frictionScore: frict,
+        intensity: c.intensity || Math.round(frict / 10),
+        radius: dynamicRadius,
         color,
         hasCrater,
         isTensionOverload,
@@ -215,12 +226,13 @@ export function GravityMapVisualizer({
     });
 
     // =========================================================================
-    // 3. ユーザーの仮説 (🪐 Custom Planet) の合成配置
+    // 3. ユーザーの仮説 (🪐 Custom Planet) の動的配置
     // =========================================================================
     const customPlanetNodes: SimulationNode[] = [];
     if (activeCustomPlanet) {
       const pull = activeCustomPlanet.pullScore ?? 60;
       const frict = activeCustomPlanet.frictionScore ?? 40;
+      const dynamicRadius = Math.round(18 + (pull / 100) * 26);
       const customDist = Math.max(110, 230 - pull * 1.3);
       const customAngle = -Math.PI / 4;
 
@@ -232,7 +244,7 @@ export function GravityMapVisualizer({
         description: activeCustomPlanet.targetPain || activeCustomPlanet.solution,
         pullScore: pull,
         frictionScore: frict,
-        radius: activeCustomPlanet.radius || 28,
+        radius: dynamicRadius,
         color: "#f59e0b",
         x: width / 2 + Math.cos(customAngle) * customDist,
         y: height / 2 + Math.sin(customAngle) * customDist,
@@ -243,11 +255,10 @@ export function GravityMapVisualizer({
     const allNodes: SimulationNode[] = [...jtbdStars, ...planetNodes, ...customPlanetNodes];
 
     // =========================================================================
-    // 4. 重力リンク (Links - 各惑星を最も近い/対応する JTBD 星にバインド)
+    // 4. 重力リンク (Links)
     // =========================================================================
     const links: SimulationLink[] = [
       ...planetNodes.map((p, i) => {
-        // JTBD星が複数の場合はインデックスに応じて分散接続
         const targetStar = jtbdStars[i % jtbdStars.length] || primaryStar;
         const pull = p.pullScore ?? 50;
         const distance = Math.max(80, 220 - pull * 1.4);
@@ -282,7 +293,7 @@ export function GravityMapVisualizer({
       }
       @keyframes craterWarningPulse {
         0% { transform: scale(1); opacity: 0.8; }
-        50% { transform: scale(1.15); opacity: 0.3; }
+        50% { transform: scale(1.18); opacity: 0.3; }
         100% { transform: scale(1); opacity: 0.8; }
       }
       .friction-wave-active {
@@ -335,6 +346,21 @@ export function GravityMapVisualizer({
 
     // 6. SVG コンテナ & Zoom
     const g = svg.append("g").attr("class", "gravity-map-container");
+
+    // 【Directive 4】背景クリックでインスペクターを閉じる (Outside Click Dismiss)
+    g.append("rect")
+      .attr("class", "background-dismiss-plane")
+      .attr("x", -width * 2)
+      .attr("y", -height * 2)
+      .attr("width", width * 5)
+      .attr("height", height * 5)
+      .attr("fill", "transparent")
+      .on("click", () => {
+        setSelectedCompany(null);
+        setSelectedCustomPlanet(null);
+        setWhatIfCards([]);
+      });
+
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, 3])
@@ -388,7 +414,8 @@ export function GravityMapVisualizer({
             }
           })
       )
-      .on("click", (_event, d) => {
+      .on("click", (event, d) => {
+        event.stopPropagation(); // 背景クリックへの伝播を防止
         if (d.rawCustomPlanet) {
           setSelectedCompany(null);
           setSelectedCustomPlanet(d.rawCustomPlanet);
@@ -400,19 +427,19 @@ export function GravityMapVisualizer({
         }
       });
 
-    // テンション警告パルスリング
+    // テンション過負荷リング
     nodeElements
       .filter((d) => Boolean(d.isTensionOverload))
       .append("circle")
-      .attr("r", (d) => d.radius + 10)
+      .attr("r", (d) => d.radius + 12)
       .attr("fill", "none")
       .attr("stroke", "#f43f5e")
       .attr("stroke-width", 2)
       .attr("stroke-dasharray", "4,3")
-      .attr("opacity", 0.8)
+      .attr("opacity", 0.85)
       .style("animation", "craterWarningPulse 1.5s ease-in-out infinite");
 
-    // メインサークル
+    // メインサークル (動的半径 d.radius)
     nodeElements
       .append("circle")
       .attr("r", (d) => d.radius)
@@ -436,25 +463,35 @@ export function GravityMapVisualizer({
       })
       .attr("opacity", (d) => (d.type === "custom_planet" ? 1 : 0.9));
 
-    // クレーターマーク
-    const craterNodes = nodeElements.filter((d) => Boolean(d.hasCrater));
+    // =========================================================================
+    // 【Directive 3】クレーター（削り取り＆クレーター痕）の動的レンダリング
+    // =========================================================================
+    const craterNodes = nodeElements.filter((d) => Boolean(d.hasCrater && d.type === "planet"));
+
+    // 表面クレータースポット (摩擦深度に比例した大きさ)
     craterNodes
       .append("circle")
-      .attr("cx", (d) => d.radius * 0.4)
-      .attr("cy", (d) => -d.radius * 0.3)
-      .attr("r", (d) => Math.max(3, d.radius * 0.28))
+      .attr("cx", (d) => d.radius * 0.35)
+      .attr("cy", (d) => -d.radius * 0.25)
+      .attr("r", (d) => {
+        const frict = d.frictionScore || 50;
+        return Math.max(3, Math.round(d.radius * (frict / 100) * 0.35));
+      })
       .attr("fill", "#0f172a")
-      .attr("stroke", "rgba(244, 63, 94, 0.6)")
+      .attr("stroke", "rgba(244, 63, 94, 0.7)")
       .attr("stroke-width", 1.5)
-      .attr("opacity", 0.9);
+      .attr("opacity", 0.95);
 
+    // 三日月状クレーター切削パス (摩擦スコアに比例した切削深度)
     craterNodes
       .append("path")
       .attr("d", (d) => {
         const r = d.radius;
-        return `M 0 -${r} A ${r} ${r} 0 0 1 ${r} 0 A ${r * 0.8} ${r * 0.8} 0 0 0 0 -${r} Z`;
+        const frict = d.frictionScore || 50;
+        const cutDepth = r * (0.4 + (frict / 100) * 0.45); // 摩擦スコアに応じた削り取り深さ
+        return `M 0 -${r} A ${r} ${r} 0 0 1 ${r} 0 A ${Math.max(4, r - cutDepth)} ${Math.max(4, r - cutDepth)} 0 0 0 0 -${r} Z`;
       })
-      .attr("fill", "rgba(15, 23, 42, 0.75)")
+      .attr("fill", "rgba(15, 23, 42, 0.85)")
       .attr("stroke", "#f43f5e")
       .attr("stroke-width", 1.5)
       .attr("opacity", 0.95);
@@ -463,8 +500,8 @@ export function GravityMapVisualizer({
     const customPlanetElements = nodeElements.filter((d) => d.type === "custom_planet");
     customPlanetElements
       .append("ellipse")
-      .attr("rx", (d) => d.radius + 14)
-      .attr("ry", (d) => d.radius / 2.5)
+      .attr("rx", (d) => d.radius + 16)
+      .attr("ry", (d) => d.radius / 2.3)
       .attr("fill", "none")
       .attr("stroke", "#f59e0b")
       .attr("stroke-width", 2.5)
@@ -504,8 +541,8 @@ export function GravityMapVisualizer({
           .distance((d) => d.distance)
           .strength(0.6)
       )
-      .force("charge", d3.forceManyBody().strength(-380))
-      .force("collide", d3.forceCollide<SimulationNode>().radius((d) => d.radius + 24))
+      .force("charge", d3.forceManyBody().strength(-400))
+      .force("collide", d3.forceCollide<SimulationNode>().radius((d) => d.radius + 26))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .on("tick", () => {
         linkElements
@@ -523,9 +560,9 @@ export function GravityMapVisualizer({
   }, [data, activeCustomPlanet, width, height]);
 
   return (
-    <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl font-sans">
+    <div className="relative w-full h-full min-h-[580px] overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl font-sans">
       {/* 重力マップヘッダー */}
-      <div className="absolute top-4 left-4 z-10 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-800 flex items-center space-x-3 text-slate-200 shadow-lg">
+      <div className="absolute top-4 left-4 z-10 bg-slate-900/80 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-slate-800 flex items-center space-x-3 text-slate-200 shadow-lg pointer-events-none">
         <Sparkles className="w-4 h-4 text-indigo-400" />
         <div>
           <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 font-mono">
@@ -539,12 +576,12 @@ export function GravityMapVisualizer({
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
-        className="w-full h-auto block select-none"
-        style={{ minHeight: "560px" }}
+        className="w-full h-full block select-none"
+        style={{ minHeight: "580px" }}
       />
 
       {/* 凡例 */}
-      <div className="absolute bottom-4 left-4 z-10 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-800 flex flex-wrap items-center gap-3 text-xs text-slate-400 shadow-lg">
+      <div className="absolute bottom-4 left-4 z-10 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-800 flex flex-wrap items-center gap-3 text-xs text-slate-400 shadow-lg pointer-events-none">
         <div className="flex items-center space-x-1.5">
           <div className="w-3 h-3 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
           <span>JTBD Stars ({data.subJtbds?.length || 4} Objectives)</span>
@@ -569,7 +606,7 @@ export function GravityMapVisualizer({
       </div>
 
       {/* ========================================================================= */}
-      {/* 競合企業詳細サイドインスペクター & 【Directive 3】AI推論・根拠の表示 */}
+      {/* 競合企業詳細サイドインスペクター (Directive 4: 実データ & AI推論 & Outside Dismiss) */}
       {/* ========================================================================= */}
       {selectedCompany && (
         <div className="absolute top-4 right-4 z-20 w-88 max-h-[92%] overflow-y-auto bg-slate-900/95 backdrop-blur-lg border border-slate-800 rounded-3xl p-5 shadow-2xl text-slate-100 animate-in fade-in slide-in-from-right-4 duration-300 scrollbar-thin">
@@ -593,7 +630,7 @@ export function GravityMapVisualizer({
             <p className="text-slate-300 italic">"{selectedCompany.tagline}"</p>
             <p className="text-slate-400 line-clamp-3 leading-relaxed">{selectedCompany.description}</p>
 
-            {/* スコア指標 (Directive 3: 実スコアバインド) */}
+            {/* スコア指標 (Directive 4: 実スコアバインド) */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
               <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/80">
                 <div className="flex items-center justify-between text-slate-400 mb-1">
@@ -618,7 +655,7 @@ export function GravityMapVisualizer({
               </div>
             </div>
 
-            {/* 【Directive 3】なぜその点数になったのかを示す AI 推論・根拠テキスト */}
+            {/* 【Directive 4】なぜその点数になったのかを示す AI 推論・根拠テキスト */}
             <div className="p-3.5 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl space-y-1.5">
               <div className="flex items-center space-x-1.5 text-indigo-300 font-bold text-[11px]">
                 <Lightbulb className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
