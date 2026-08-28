@@ -31,6 +31,16 @@ export default function GarageDashboard() {
   const [mapResult, setMapResult] = useState<GravityMapData | null>(null);
   const [isTriggering, setIsTriggering] = useState(false);
 
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "discover" || tabParam === "validate" || tabParam === "kanban") {
+        setActiveTab(tabParam);
+      }
+    }
+  }, []);
+
   // 探索ジョブの開始 & 専用マップ画面への遷移
   const handleStartDiscovery = async (genreNameToAnalyze: string, genreId?: string) => {
     if (genreId) {

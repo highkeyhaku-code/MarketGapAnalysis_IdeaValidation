@@ -114,6 +114,8 @@ export const MarketInsightSchema = z.object({
     .int()
     .min(1, { message: "intensity must be between 1 and 10" })
     .max(10, { message: "intensity must be between 1 and 10" }),
+  pull_scores: z.record(z.string(), z.number().min(0).max(100)).optional(), // 多対多引力マトリックス
+  friction_score: z.number().min(0).max(100).optional(),
   needs_web_search: z.boolean(),
   negative_bias_applied: z.boolean(),
   autopsy_report: z.union([z.string(), AutopsyReportSchema]).nullable(),
