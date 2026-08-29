@@ -223,7 +223,7 @@ export default function DedicatedMarketMapPage() {
         <div className="flex items-center justify-between text-xs text-slate-400">
           <div className="flex items-center space-x-2 text-emerald-400 font-semibold">
             <CheckCircle2 className="w-4 h-4" />
-            <span>{mapData.companies.length} Competitors Mapped across {mapData.subJtbds?.length || 4} JTBD Gravity Centers</span>
+            <span>{mapData.companies.length} Competitors Mapped across {mapData.jtbdList?.length || mapData.subJtbds?.length || 4} JTBD Gravity Centers</span>
           </div>
           <span className="font-mono text-[11px] text-slate-500">
             Sector ID: {genreId}

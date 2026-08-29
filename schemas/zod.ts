@@ -124,19 +124,61 @@ export const MarketInsightSchema = z
     needs_web_search: z.boolean().optional().default(false),
     negative_bias_applied: z.boolean().optional().default(true),
     autopsy_report: z.union([z.string(), AutopsyReportSchema]).nullable().optional().default(null),
+    // 単一推論テキスト (後方互換)
     score_reasoning: z.string().optional(),
     scoreReasoning: z.string().optional(),
+    // 多言語・構造化推論フィールド (EN / JA)
+    reasoning_pull_en: z.string().optional(),
+    reasoning_pull_ja: z.string().optional(),
+    reasoning_friction_en: z.string().optional(),
+    reasoning_friction_ja: z.string().optional(),
+    reasoning_pull: z.union([z.string(), z.object({ en: z.string(), ja: z.string() })]).optional(),
+    reasoning_friction: z.union([z.string(), z.object({ en: z.string(), ja: z.string() })]).optional(),
   })
-  .transform((data) => ({
-    target_feature_id: data.target_feature_id,
-    intensity: data.intensity,
-    pull_scores: data.pull_scores || data.pullScores || {},
-    friction_score: data.friction_score ?? data.frictionScore,
-    needs_web_search: data.needs_web_search ?? false,
-    negative_bias_applied: data.negative_bias_applied ?? true,
-    autopsy_report: data.autopsy_report ?? null,
-    score_reasoning: data.score_reasoning || data.scoreReasoning || "",
-  }));
+  .transform((data) => {
+    const pullEn =
+      data.reasoning_pull_en ||
+      (typeof data.reasoning_pull === "object" ? data.reasoning_pull.en : undefined) ||
+      (typeof data.reasoning_pull === "string" ? data.reasoning_pull : undefined) ||
+      data.score_reasoning ||
+      data.scoreReasoning ||
+      "";
+
+    const pullJa =
+      data.reasoning_pull_ja ||
+      (typeof data.reasoning_pull === "object" ? data.reasoning_pull.ja : undefined) ||
+      (typeof data.reasoning_pull === "string" ? data.reasoning_pull : undefined) ||
+      data.score_reasoning ||
+      data.scoreReasoning ||
+      "";
+
+    const frictionEn =
+      data.reasoning_friction_en ||
+      (typeof data.reasoning_friction === "object" ? data.reasoning_friction.en : undefined) ||
+      (typeof data.reasoning_friction === "string" ? data.reasoning_friction : undefined) ||
+      `Users reported operational friction in ${data.target_feature_id}.`;
+
+    const frictionJa =
+      data.reasoning_friction_ja ||
+      (typeof data.reasoning_friction === "object" ? data.reasoning_friction.ja : undefined) ||
+      (typeof data.reasoning_friction === "string" ? data.reasoning_friction : undefined) ||
+      `ユーザーは${data.target_feature_id}において設定負荷と摩擦を報告しています。`;
+
+    return {
+      target_feature_id: data.target_feature_id,
+      intensity: data.intensity,
+      pull_scores: data.pull_scores || data.pullScores || {},
+      friction_score: data.friction_score ?? data.frictionScore,
+      needs_web_search: data.needs_web_search ?? false,
+      negative_bias_applied: data.negative_bias_applied ?? true,
+      autopsy_report: data.autopsy_report ?? null,
+      score_reasoning: data.score_reasoning || data.scoreReasoning || pullJa || pullEn || "",
+      reasoning_pull_en: pullEn,
+      reasoning_pull_ja: pullJa,
+      reasoning_friction_en: frictionEn,
+      reasoning_friction_ja: frictionJa,
+    };
+  });
 
 export type MarketInsight = z.infer<typeof MarketInsightSchema>;
 
