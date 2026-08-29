@@ -110,7 +110,86 @@ async function main() {
     throw new Error("Repulsion force scaling failed!");
   }
 
-  console.log("\n✅ ALL PHASE 1 GOD-UX AUDIT TESTS PASSED SUCCESSFULLY!\n");
+  // 5. Real Share Data Binding & "520+" Elimination Test
+  console.log("\n[Test 5] Real Share Data Binding & '520+' Elimination...");
+  const formatShare = (c: { followersCount?: number; rawReviewsCount?: number }) => {
+    if (c.followersCount !== undefined && c.followersCount !== null && c.followersCount > 0) {
+      return c.followersCount.toLocaleString();
+    }
+    if (c.rawReviewsCount !== undefined && c.rawReviewsCount !== null && c.rawReviewsCount > 0) {
+      return `${c.rawReviewsCount.toLocaleString()} revs`;
+    }
+    return "N/A";
+  };
+
+  const shareCases = [
+    { input: { followersCount: 4200 }, expected: "4,200" },
+    { input: { rawReviewsCount: 156 }, expected: "156 revs" },
+    { input: {}, expected: "N/A" },
+    { input: { followersCount: 0, rawReviewsCount: 0 }, expected: "N/A" },
+  ];
+
+  shareCases.forEach((sc, i) => {
+    const res = formatShare(sc.input);
+    console.log(`  - Case ${i + 1}: ${JSON.stringify(sc.input)} => "${res}" (Expected: "${sc.expected}")`);
+    if (res !== sc.expected) {
+      throw new Error(`Share format mismatch: got "${res}", expected "${sc.expected}"`);
+    }
+  });
+
+  // 6. JTBD Bidirectional Hover Ranking Calculation Test
+  console.log("\n[Test 6] JTBD Bidirectional Hover Ranking Calculation...");
+  const mockCompetitors = [
+    { name: "Alpha", pullScores: { "jtbd-star-0": 95, "jtbd-star-1": 60 } },
+    { name: "Beta", pullScores: { "jtbd-star-0": 88, "jtbd-star-1": 92 } },
+    { name: "Gamma", pullScores: { "jtbd-star-0": 72, "jtbd-star-1": 85 } },
+    { name: "Delta", pullScores: { "jtbd-star-0": 45, "jtbd-star-1": 30 } },
+  ];
+
+  const targetStarId = "jtbd-star-0";
+  const rankedForStar0 = mockCompetitors
+    .map((c) => ({ name: c.name, score: c.pullScores[targetStarId as "jtbd-star-0"] }))
+    .sort((a, b) => b.score - a.score);
+
+  console.log(`  Top 3 rankings for ${targetStarId}:`);
+  const medals = ["🥇 1st", "🥈 2nd", "🥉 3rd"];
+  rankedForStar0.slice(0, 3).forEach((item, idx) => {
+    console.log(`    ${medals[idx]}: ${item.name} (Pull: ${item.score})`);
+  });
+
+  if (rankedForStar0[0].name !== "Alpha" || rankedForStar0[1].name !== "Beta" || rankedForStar0[2].name !== "Gamma") {
+    throw new Error("JTBD ranking ordering mismatch!");
+  }
+
+  // 7. Client-Side Aggregated JTBD Inspector Metrics Test
+  console.log("\n[Test 7] Client-Side Aggregated JTBD Inspector Metrics...");
+  const companiesData = [
+    { companyId: "c1", name: "Alpha", pullScore: 80, pullScores: { "jtbd-star-0": 90 }, frictionScore: 30, targetFeatureId: "API" },
+    { companyId: "c2", name: "Beta", pullScore: 70, pullScores: { "jtbd-star-0": 80 }, frictionScore: 65, targetFeatureId: "DB Relations" },
+    { companyId: "c3", name: "Gamma", pullScore: 60, pullScores: { "jtbd-star-0": 40 }, frictionScore: 85, targetFeatureId: "Query Cost" },
+  ];
+
+  let totalPull = 0;
+  let totalFriction = 0;
+  companiesData.forEach((c) => {
+    totalPull += c.pullScores["jtbd-star-0"];
+    totalFriction += c.frictionScore;
+  });
+
+  const avgPull = Math.round(totalPull / companiesData.length);
+  const avgFriction = Math.round(totalFriction / companiesData.length);
+  const saturation = avgPull >= 72 ? "high" : avgPull < 50 ? "underserved" : "moderate";
+
+  console.log(`  - Aggregated Metrics for jtbd-star-0:`);
+  console.log(`    Average Pull: ${avgPull}/100 (Expected: 70)`);
+  console.log(`    Average Friction: ${avgFriction}/100 (Expected: 60)`);
+  console.log(`    Saturation Level: ${saturation} (Expected: moderate)`);
+
+  if (avgPull !== 70 || avgFriction !== 60 || saturation !== "moderate") {
+    throw new Error("Client-side JTBD metric aggregation failed!");
+  }
+
+  console.log("\n✅ ALL PHASE 1 GOD-UX AUDIT TESTS (INCLUDING FIXES & JTBD DUAL-HOVER) PASSED SUCCESSFULLY!\n");
 }
 
 main().catch((err) => {

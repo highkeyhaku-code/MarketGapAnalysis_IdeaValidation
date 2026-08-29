@@ -20,6 +20,11 @@ import {
   Layers,
   Users,
   Info,
+  Award,
+  TrendingUp,
+  Activity,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WhatIfCard } from "../app/api/market/whatif/route";
@@ -107,11 +112,34 @@ interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
 }
 
 /**
+ * JTBD 集計メトリクス (クライアントサイド即時集計型)
+ */
+interface JtbdAggregatedMetrics {
+  starId: string;
+  nameEn: string;
+  nameJa: string;
+  averagePull: number;
+  averageFriction: number;
+  topSolvers: Array<{
+    company: EvaluatedCompanyNode;
+    pullScore: number;
+    frictionScore: number;
+    rank: number;
+  }>;
+  highestFrictionCompany: {
+    company: EvaluatedCompanyNode;
+    frictionScore: number;
+    targetFeatureId: string;
+  } | null;
+  saturationLevel: "high" | "moderate" | "underserved";
+}
+
+/**
  * D3.js 物理演算ベース重力マップ描画コンポーネント (GravityMapVisualizer)
- * - 1. DB・スキーマレベルの多言語化 (🌐 EN / JA State駆動切り替え)
- * - 2. 市場シェア正規化 (Sqrt/Log スケール) & 摩擦斥力ベクトル (D3 forceFrictionRepulsion)
- * - 3. 常設グラフィカル凡例 (Legend) & ホバー時ハイライト (最高引力線 & 摩擦線のみ強調・他半透明化)
- * - 4. 構造化インスペクターUI (「強い引力の源泉 (Pull)」と「クレーターの発生要因 (Friction)」+ JTBD Multi-Pull Matrix)
+ * - 1. シェア数固定化バグ排除 (実データ厳密バインド & N/A フォールバック)
+ * - 2. JTBD双方向ホバーUX (全解決企業リンク強調 & 🥇/🥈/🥉 ランキングバッジ動的オーバーレイ)
+ * - 3. フロント集計型JTBDインスペクター (LLM追加コール不要の即時充足度・トッププレイヤー・摩擦集中度表示)
+ * - 4. DB・スキーマレベルの多言語化 (🌐 EN / JA State駆動切り替え)
  */
 export function GravityMapVisualizer({
   data,
@@ -129,6 +157,7 @@ export function GravityMapVisualizer({
 
   const [selectedCompany, setSelectedCompany] = useState<EvaluatedCompanyNode | null>(null);
   const [selectedCustomPlanet, setSelectedCustomPlanet] = useState<CustomPlanetData | null>(null);
+  const [selectedStar, setSelectedStar] = useState<SimulationNode | null>(null);
 
   // What-If オンデマンド生成状態
   const [isGeneratingWhatIf, setIsGeneratingWhatIf] = useState(false);
@@ -156,6 +185,68 @@ export function GravityMapVisualizer({
       { id: "jtbd-star-3", name_en: "Bottom-Up Team Adoption", name_ja: "現場主導での導入と学習コスト極小化" },
     ];
   }, [data.jtbdList, data.subJtbds]);
+
+  // クライアントサイド即時集計: 選択された JTBD 星の充足度・トッププレイヤー・摩擦集中度
+  const selectedStarMetrics = useMemo<JtbdAggregatedMetrics | null>(() => {
+    if (!selectedStar || selectedStar.type !== "star") return null;
+    const starId = selectedStar.id;
+    const companies = data.companies || [];
+    if (companies.length === 0) return null;
+
+    let totalPull = 0;
+    let totalFriction = 0;
+
+    const ranked = companies.map((c) => {
+      const pScore = c.pullScores?.[starId] ?? c.pullScores?.[selectedStar.rawStar?.id || ""] ?? (c.pullScore || 50);
+      const fScore = c.frictionScore || 50;
+      totalPull += pScore;
+      totalFriction += fScore;
+      return {
+        company: c,
+        pullScore: pScore,
+        frictionScore: fScore,
+      };
+    });
+
+    ranked.sort((a, b) => b.pullScore - a.pullScore);
+
+    const averagePull = Math.round(totalPull / companies.length);
+    const averageFriction = Math.round(totalFriction / companies.length);
+
+    const topSolvers = ranked.slice(0, 3).map((item, idx) => ({
+      ...item,
+      rank: idx + 1,
+    }));
+
+    let highestFrictionComp: { company: EvaluatedCompanyNode; frictionScore: number; targetFeatureId: string } | null = null;
+    for (const c of companies) {
+      if (!highestFrictionComp || (c.frictionScore || 0) > highestFrictionComp.frictionScore) {
+        highestFrictionComp = {
+          company: c,
+          frictionScore: c.frictionScore || 0,
+          targetFeatureId: c.targetFeatureId || "Setup Complexity",
+        };
+      }
+    }
+
+    let saturationLevel: "high" | "moderate" | "underserved" = "moderate";
+    if (averagePull >= 72) {
+      saturationLevel = "high";
+    } else if (averagePull < 50) {
+      saturationLevel = "underserved";
+    }
+
+    return {
+      starId,
+      nameEn: selectedStar.name_en || selectedStar.name,
+      nameJa: selectedStar.name_ja || selectedStar.name,
+      averagePull,
+      averageFriction,
+      topSolvers,
+      highestFrictionCompany: highestFrictionComp,
+      saturationLevel,
+    };
+  }, [selectedStar, data.companies]);
 
   // What-If 生成 API の呼び出し
   const handleGenerateWhatIf = async (company: EvaluatedCompanyNode) => {
@@ -232,9 +323,12 @@ export function GravityMapVisualizer({
       const pull = Math.max(10, Math.min(100, c.pullScore || 50));
       const frict = Math.max(10, Math.min(100, c.frictionScore || 50));
 
-      const followers = c.followersCount ?? (c as any).votesCount ?? (i === 0 ? 1250 : Math.max(20, 380 - i * 25));
-      const reviews = c.rawReviewsCount ?? (c as any).reviewsCount ?? (i === 0 ? 320 : Math.max(10, 85 - i * 5));
-      const volume = Math.max(0, followers) + Math.max(0, reviews) * 2;
+      const rawVotes = c.followersCount ?? (c as any).followers_count ?? (c as any).votesCount;
+      const rawRevs = c.rawReviewsCount ?? (c as any).raw_reviews_count ?? (c as any).reviewsCount;
+      const followers = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
+      const reviews = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
+
+      const volume = (followers || 0) + (reviews || 0) * 2;
 
       // Sqrt スケールで巨大企業が画面を埋めないよう正規化 (16px 〜 44px)
       let dynamicRadius: number;
@@ -399,7 +493,7 @@ export function GravityMapVisualizer({
         opacity: 1 !important;
       }
       .link-dimmed {
-        opacity: 0.06 !important;
+        opacity: 0.05 !important;
         stroke-width: 0.6px !important;
       }
       .node-dimmed {
@@ -442,6 +536,7 @@ export function GravityMapVisualizer({
       .on("click", () => {
         setSelectedCompany(null);
         setSelectedCustomPlanet(null);
+        setSelectedStar(null);
         setWhatIfCards([]);
       });
 
@@ -476,8 +571,11 @@ export function GravityMapVisualizer({
       })
       .attr("stroke-dasharray", (d) => (d.isCustomLink ? "5,3" : d.isFrictionOverload ? "6,4" : "3,3"));
 
+    // ランキングオーバーレイグループ
+    const rankingOverlayGroup = g.append("g").attr("class", "jtbd-ranking-overlay").attr("pointer-events", "none");
+
     // =========================================================================
-    // 8. ノード描画 & 【直感性を高めるホバーUX】
+    // 8. ノード描画 & 【双方向ホバーUX & ランキングバッジ】
     // =========================================================================
     const nodeGroup = g.append("g").attr("class", "nodes");
     const nodeElements = nodeGroup
@@ -508,62 +606,132 @@ export function GravityMapVisualizer({
           })
       )
       .on("mouseenter", (_event, hoveredNode) => {
-        if (hoveredNode.type !== "planet") return;
+        if (hoveredNode.type === "star") {
+          // =====================================================================
+          // 【JTBD 星ホバー時】全解決企業リンクを強調 & 🥇 1st / 🥈 2nd / 🥉 3rd ランキング表示
+          // =====================================================================
+          linkElements.each(function (l) {
+            const el = d3.select(this);
+            const linkStarId = typeof l.source === "object" ? (l.source as SimulationNode).id : l.source;
+            if (linkStarId === hoveredNode.id) {
+              el.attr("class", "link-highlight-pull");
+            } else {
+              el.attr("class", "link-dimmed");
+            }
+          });
 
-        // 該当企業に繋がるリンクを取得
-        const attachedLinks = links.filter((l) => {
-          const targetId = typeof l.target === "object" ? (l.target as SimulationNode).id : l.target;
-          return targetId === hoveredNode.id;
-        });
+          nodeElements.each(function (n) {
+            const el = d3.select(this);
+            if (n.id === hoveredNode.id || n.type === "planet") {
+              el.classed("node-dimmed", false);
+            } else {
+              el.classed("node-dimmed", true);
+            }
+          });
 
-        if (attachedLinks.length === 0) return;
+          // ランキングバッジ (Top 3 企業) の動的オーバーレイ描画
+          rankingOverlayGroup.selectAll("*").remove();
 
-        // 1. 最も引力が強い（スコア最大）リンクを特定
-        let maxPullLink = attachedLinks[0];
-        for (const l of attachedLinks) {
-          if (l.pull > maxPullLink.pull) {
-            maxPullLink = l;
+          const planetRankings = planetNodes.map((p) => {
+            const pScore = p.pullScores?.[hoveredNode.id] ?? p.pullScores?.[hoveredNode.rawStar?.id || ""] ?? (p.pullScore || 50);
+            return { node: p, score: pScore };
+          }).sort((a, b) => b.score - a.score);
+
+          const medals = [
+            { label: "🥇 1st", stroke: "#f59e0b", fill: "#fef08a" },
+            { label: "🥈 2nd", stroke: "#94a3b8", fill: "#f1f5f9" },
+            { label: "🥉 3rd", stroke: "#f97316", fill: "#fed7aa" },
+          ];
+
+          planetRankings.slice(0, 3).forEach((item, idx) => {
+            const medal = medals[idx];
+            const badge = rankingOverlayGroup
+              .append("g")
+              .attr("class", "ranking-badge-item")
+              .attr("transform", `translate(${item.node.x ?? 0}, ${item.node.y ?? 0})`)
+              .attr("opacity", 0);
+
+            badge
+              .append("rect")
+              .attr("x", item.node.radius + 8)
+              .attr("y", -14)
+              .attr("rx", 10)
+              .attr("ry", 10)
+              .attr("width", 76)
+              .attr("height", 24)
+              .attr("fill", "rgba(15, 23, 42, 0.96)")
+              .attr("stroke", medal.stroke)
+              .attr("stroke-width", 1.8)
+              .attr("filter", "url(#gold-glow)");
+
+            badge
+              .append("text")
+              .attr("x", item.node.radius + 46)
+              .attr("y", 2)
+              .attr("text-anchor", "middle")
+              .attr("fill", medal.fill)
+              .attr("font-size", "10.5px")
+              .attr("font-weight", "900")
+              .text(`${medal.label} (${item.score})`);
+
+            badge.transition().duration(200).attr("opacity", 1);
+          });
+        } else if (hoveredNode.type === "planet") {
+          // =====================================================================
+          // 【企業惑星ホバー時】最高引力線 & 摩擦線のみ強調・他を半透明化
+          // =====================================================================
+          const attachedLinks = links.filter((l) => {
+            const targetId = typeof l.target === "object" ? (l.target as SimulationNode).id : l.target;
+            return targetId === hoveredNode.id;
+          });
+
+          if (attachedLinks.length === 0) return;
+
+          let maxPullLink = attachedLinks[0];
+          for (const l of attachedLinks) {
+            if (l.pull > maxPullLink.pull) {
+              maxPullLink = l;
+            }
           }
-        }
 
-        // 2. 摩擦・クレーターに関連するリンクを特定 (摩擦過負荷または最大摩擦星)
-        let frictionLink = attachedLinks.find((l) => l.isFrictionOverload);
-        if (!frictionLink) {
-          frictionLink = attachedLinks.reduce((minL, l) => (l.pull < minL.pull ? l : minL), attachedLinks[0]);
-        }
-
-        const focusedStarIds = new Set<string>();
-        const getStarId = (l: SimulationLink) => (typeof l.source === "object" ? (l.source as SimulationNode).id : l.source);
-
-        focusedStarIds.add(getStarId(maxPullLink));
-        if (frictionLink && frictionLink !== maxPullLink) {
-          focusedStarIds.add(getStarId(frictionLink));
-        }
-
-        // リンクのハイライト & 他を半透明化
-        linkElements.each(function (l) {
-          const el = d3.select(this);
-          if (l === maxPullLink) {
-            el.attr("class", "link-highlight-pull");
-          } else if (l === frictionLink && frictionLink !== maxPullLink) {
-            el.attr("class", "link-highlight-friction");
-          } else {
-            el.attr("class", "link-dimmed");
+          let frictionLink = attachedLinks.find((l) => l.isFrictionOverload);
+          if (!frictionLink) {
+            frictionLink = attachedLinks.reduce((minL, l) => (l.pull < minL.pull ? l : minL), attachedLinks[0]);
           }
-        });
 
-        // ノードのハイライト & 他を半透明化
-        nodeElements.each(function (n) {
-          const el = d3.select(this);
-          if (n.id === hoveredNode.id || focusedStarIds.has(n.id)) {
-            el.classed("node-dimmed", false);
-          } else {
-            el.classed("node-dimmed", true);
+          const focusedStarIds = new Set<string>();
+          const getStarId = (l: SimulationLink) => (typeof l.source === "object" ? (l.source as SimulationNode).id : l.source);
+
+          focusedStarIds.add(getStarId(maxPullLink));
+          if (frictionLink && frictionLink !== maxPullLink) {
+            focusedStarIds.add(getStarId(frictionLink));
           }
-        });
+
+          linkElements.each(function (l) {
+            const el = d3.select(this);
+            if (l === maxPullLink) {
+              el.attr("class", "link-highlight-pull");
+            } else if (l === frictionLink && frictionLink !== maxPullLink) {
+              el.attr("class", "link-highlight-friction");
+            } else {
+              el.attr("class", "link-dimmed");
+            }
+          });
+
+          nodeElements.each(function (n) {
+            const el = d3.select(this);
+            if (n.id === hoveredNode.id || focusedStarIds.has(n.id)) {
+              el.classed("node-dimmed", false);
+            } else {
+              el.classed("node-dimmed", true);
+            }
+          });
+        }
       })
       .on("mouseleave", () => {
-        // ホバー解除: すべてのリンクとノードのスタイルを元に戻す
+        // ホバー解除: ランキングバッジ削除 & すべてのリンクとノードのスタイルを元に戻す
+        rankingOverlayGroup.selectAll("*").remove();
+
         linkElements.each(function (l) {
           const el = d3.select(this);
           el.attr("class", l.isFrictionOverload ? "friction-wave-active" : "")
@@ -584,12 +752,20 @@ export function GravityMapVisualizer({
       })
       .on("click", (event, d) => {
         event.stopPropagation();
-        if (d.rawCustomPlanet) {
+        if (d.type === "star") {
+          // 【JTBD 星クリック時】フロント集計型 JTBD インスペクター展開
           setSelectedCompany(null);
+          setSelectedCustomPlanet(null);
+          setSelectedStar(d);
+          setWhatIfCards([]);
+        } else if (d.rawCustomPlanet) {
+          setSelectedCompany(null);
+          setSelectedStar(null);
           setSelectedCustomPlanet(d.rawCustomPlanet);
           setWhatIfCards([]);
         } else if (d.rawCompany) {
           setSelectedCustomPlanet(null);
+          setSelectedStar(null);
           setSelectedCompany(d.rawCompany);
           setWhatIfCards([]);
         }
@@ -697,13 +873,12 @@ export function GravityMapVisualizer({
     // =========================================================================
     // 9. 【斥力物理演算】D3 Force Simulation & frictionRepulsionForce
     // =========================================================================
-    // 中心（重心）から外側へ不満の大きい企業を弾き飛ばす「斥力ベクトル」フォース
     const frictionRepulsionForce = (alpha: number) => {
       const centerX = width / 2;
       const centerY = height / 2;
       for (const node of allNodes) {
         if (node.type !== "planet") continue;
-        const frict = (node.frictionScore || 0) / 100; // 0.0 to 1.0
+        const frict = (node.frictionScore || 0) / 100;
         if (frict <= 0.05) continue;
 
         const dx = (node.x ?? centerX) - centerX || (Math.random() - 0.5);
@@ -712,7 +887,6 @@ export function GravityMapVisualizer({
         const unitX = dx / dist;
         const unitY = dy / dist;
 
-        // 不満の強い巨人を外周へ追いやる指向性斥力ベクトル
         const pushStrength = Math.pow(frict, 1.3) * 150 * alpha;
         node.vx = (node.vx ?? 0) + unitX * pushStrength;
         node.vy = (node.vy ?? 0) + unitY * pushStrength;
@@ -837,7 +1011,7 @@ export function GravityMapVisualizer({
                 {lang === "ja" ? "惑星サイズ ＝ シェア" : "Size ＝ Market Share"}
               </span>
               <span className="text-[9px] text-slate-400">
-                {lang === "ja" ? "フォロワー・レビュー数" : "User Volume (Sqrt)"}
+                {lang === "ja" ? "実数ベース (Sqrt正規化)" : "Real Volume (Sqrt)"}
               </span>
             </div>
           </div>
@@ -873,7 +1047,178 @@ export function GravityMapVisualizer({
       </div>
 
       {/* ========================================================================= */}
-      {/* 【構造化インスペクターUI】(AI推論: Pull源泉 vs Friction要因 + JTBD Matrix) */}
+      {/* 【フロント集計型 JTBD インスペクターUI】(星クリック時: 充足度・Top3・摩擦集計) */}
+      {/* ========================================================================= */}
+      {selectedStar && selectedStarMetrics && (
+        <div className="absolute top-4 right-4 z-20 w-92 max-h-[94%] overflow-y-auto bg-slate-900/95 backdrop-blur-xl border border-indigo-500/40 rounded-3xl p-5 shadow-2xl text-slate-100 animate-in fade-in slide-in-from-right-4 duration-300 scrollbar-thin">
+          {/* ヘッダー & 言語トグル */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center space-x-2">
+              <div className="w-5 h-5 rounded-full bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.8)] border border-indigo-300 flex items-center justify-center shrink-0">
+                <Target className="w-3 h-3 text-white" />
+              </div>
+              <div>
+                <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 font-mono text-[9px] font-bold rounded border border-indigo-500/30 uppercase">
+                  {lang === "ja" ? "JTBD 解決目標" : "JTBD Objective"}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              <button
+                onClick={() => setLang((l) => (l === "ja" ? "en" : "ja"))}
+                className="px-2 py-0.5 bg-slate-950 hover:bg-slate-800 text-indigo-300 rounded-lg border border-slate-700 text-[10px] font-mono font-bold transition cursor-pointer"
+                title="Switch Language"
+              >
+                🌐 {lang.toUpperCase()}
+              </button>
+
+              <button
+                onClick={() => setSelectedStar(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-3 text-xs">
+            <h3 className="font-bold text-sm text-slate-100 leading-snug">
+              {lang === "ja" ? selectedStarMetrics.nameJa : selectedStarMetrics.nameEn}
+            </h3>
+
+            {/* 市場充足度 (Market Satisfaction / Average Pull) */}
+            <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800/90 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1">
+                  <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{lang === "ja" ? "市場の充足度 (Average Pull)" : "Market Satisfaction"}</span>
+                </span>
+                <span className="text-base font-bold font-mono text-indigo-400">
+                  {selectedStarMetrics.averagePull}
+                  <span className="text-[10px] text-slate-500 font-normal">/100</span>
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+                <div
+                  className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${selectedStarMetrics.averagePull}%` }}
+                />
+              </div>
+
+              <div className="pt-1 flex items-center justify-between text-[10px]">
+                <span className="text-slate-400">{lang === "ja" ? "充足ステータス:" : "Status:"}</span>
+                {selectedStarMetrics.saturationLevel === "high" ? (
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center space-x-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>{lang === "ja" ? "高充足 (レッドオーシャン)" : "High Saturation"}</span>
+                  </span>
+                ) : selectedStarMetrics.saturationLevel === "underserved" ? (
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 flex items-center space-x-1">
+                    <Sparkles className="w-3 h-3" />
+                    <span>{lang === "ja" ? "未充足・参入好機 (ブルーオーシャン)" : "Underserved Opportunity"}</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30 flex items-center space-x-1">
+                    <Activity className="w-3 h-3" />
+                    <span>{lang === "ja" ? "中充足 (差別化余地あり)" : "Moderate Saturation"}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* トッププレイヤーランキング (Top 3 Solvers) */}
+            <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800/90 space-y-2.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block flex items-center justify-between">
+                <span className="flex items-center space-x-1">
+                  <Award className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{lang === "ja" ? "トッププレイヤー (Top Solvers)" : "Top Solvers Ranking"}</span>
+                </span>
+                <span className="font-mono text-[9px] text-slate-500">By Pull Score</span>
+              </span>
+
+              <div className="space-y-1.5">
+                {selectedStarMetrics.topSolvers.map((solver) => {
+                  const medals = ["🥇", "🥈", "🥉"];
+                  return (
+                    <button
+                      key={solver.company.companyId}
+                      onClick={() => {
+                        setSelectedStar(null);
+                        setSelectedCompany(solver.company);
+                      }}
+                      className="w-full p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 text-left transition cursor-pointer flex items-center justify-between group"
+                    >
+                      <div className="flex items-center space-x-2 truncate">
+                        <span className="text-sm shrink-0">{medals[solver.rank - 1]}</span>
+                        <div className="truncate">
+                          <span className="font-bold text-slate-200 group-hover:text-indigo-300 transition text-[11px] block truncate">
+                            {solver.company.name}
+                          </span>
+                          <span className="text-[9px] text-slate-400 truncate block">
+                            {solver.company.tagline || solver.company.description}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0 pl-2">
+                        <div className="text-right">
+                          <span className="text-[10px] font-mono font-bold text-indigo-400 block">
+                            P: {solver.pullScore}
+                          </span>
+                          <span className="text-[9px] font-mono text-rose-400 block">
+                            F: {solver.frictionScore}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 摩擦の集中度 (Friction Heat & Gap Analysis) */}
+            <div className="p-3 bg-rose-950/20 border border-rose-500/30 rounded-2xl space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider flex items-center space-x-1">
+                  <Flame className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{lang === "ja" ? "摩擦の集中度 (Friction Heat)" : "Friction Heat Index"}</span>
+                </span>
+                <span className="font-mono font-bold text-rose-400 text-xs">
+                  Avg: {selectedStarMetrics.averageFriction}/100
+                </span>
+              </div>
+
+              {selectedStarMetrics.highestFrictionCompany && (
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  {lang === "ja"
+                    ? `この課題領域では特に「${selectedStarMetrics.highestFrictionCompany.company.name}」の ${selectedStarMetrics.highestFrictionCompany.targetFeatureId} において不満（Friction: ${selectedStarMetrics.highestFrictionCompany.frictionScore}）が集中しており、新規参入の切り込みポイントとなります。`
+                    : `Incumbent ${selectedStarMetrics.highestFrictionCompany.company.name} experiences heavy customer friction (Friction: ${selectedStarMetrics.highestFrictionCompany.frictionScore}) in ${selectedStarMetrics.highestFrictionCompany.targetFeatureId}, highlighting an exploitable gap.`}
+                </p>
+              )}
+            </div>
+
+            {/* このJTBDを軸にした仮説検証ボタン */}
+            <button
+              onClick={() => {
+                const query = new URLSearchParams({
+                  targetPain: lang === "ja" ? selectedStarMetrics.nameJa : selectedStarMetrics.nameEn,
+                  coreEdge: `${lang === "ja" ? selectedStarMetrics.nameJa : selectedStarMetrics.nameEn} を圧倒的な低摩擦・高速度で実現`,
+                }).toString();
+                router.push(`/validate?${query}`);
+              }}
+              className="w-full mt-2 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition cursor-pointer flex items-center justify-center space-x-1.5"
+            >
+              <span>{lang === "ja" ? "🚀 このJTBDの解決を軸に検証を開始" : "🚀 Launch in Editor with this JTBD"}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 【構造化企業インスペクターUI】(AI推論: Pull源泉 vs Friction要因 + JTBD Matrix) */}
       {/* ========================================================================= */}
       {selectedCompany && (
         <div className="absolute top-4 right-4 z-20 w-92 max-h-[94%] overflow-y-auto bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-5 shadow-2xl text-slate-100 animate-in fade-in slide-in-from-right-4 duration-300 scrollbar-thin">
@@ -885,7 +1230,6 @@ export function GravityMapVisualizer({
             </div>
 
             <div className="flex items-center space-x-1.5">
-              {/* インスペクター内言語切替ボタン */}
               <button
                 onClick={() => setLang((l) => (l === "ja" ? "en" : "ja"))}
                 className="px-2 py-0.5 bg-slate-950 hover:bg-slate-800 text-indigo-300 rounded-lg border border-slate-700 text-[10px] font-mono font-bold transition cursor-pointer"
@@ -910,7 +1254,7 @@ export function GravityMapVisualizer({
             <p className="text-slate-300 italic text-[11px]">"{selectedCompany.tagline}"</p>
             <p className="text-slate-400 line-clamp-3 text-[11px] leading-relaxed">{selectedCompany.description}</p>
 
-            {/* スコア指標 & 市場シェア (正規化根拠) */}
+            {/* スコア指標 & 市場シェア (実データ厳密バインド・520+排除) */}
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80">
               <div className="p-2 bg-slate-950 rounded-xl border border-slate-800/80">
                 <div className="flex items-center justify-between text-slate-400 mb-0.5">
@@ -940,7 +1284,11 @@ export function GravityMapVisualizer({
                   <Users className="w-3 h-3 text-amber-400" />
                 </div>
                 <div className="text-sm font-bold font-mono text-amber-300 truncate">
-                  {selectedCompany.followersCount || 100}+
+                  {selectedCompany.followersCount !== undefined && selectedCompany.followersCount !== null && selectedCompany.followersCount > 0
+                    ? selectedCompany.followersCount.toLocaleString()
+                    : selectedCompany.rawReviewsCount !== undefined && selectedCompany.rawReviewsCount !== null && selectedCompany.rawReviewsCount > 0
+                    ? `${selectedCompany.rawReviewsCount.toLocaleString()} revs`
+                    : "N/A"}
                 </div>
               </div>
             </div>
@@ -1199,4 +1547,5 @@ export function GravityMapVisualizer({
     </div>
   );
 }
+
 

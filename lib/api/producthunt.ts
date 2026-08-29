@@ -153,7 +153,7 @@ function getFallbackProductHuntData(appName: string): ProductHuntAppDetails {
     description: `${appName} helps teams streamline operations, manage complex processes, and collaborate in real-time. However, users often cite high setup overhead and steep learning curves.`,
     features: ["Collaboration", "Workflow Automation", "API Integration", "Analytics"],
     homepageUrl: `https://${appName.toLowerCase().replace(/[^a-z0-9]/g, "")}.example.com`,
-    reviewsCount: 142,
-    votesCount: 520,
+    reviewsCount: 0,
+    votesCount: 0,
   };
 }

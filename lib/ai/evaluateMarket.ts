@@ -327,12 +327,14 @@ Return a valid JSON object strictly conforming to:
       network_effect: Math.min(10, Math.max(1, Math.round((pullScore / 100) * 6))),
     };
 
-    // 市場シェア指標 (フォロワー数・レビュー数)
-    const followersCount = (appDetails as any).followers_count ?? appDetails.votesCount ?? (idx === 0 ? 1250 : 380 - idx * 25);
-    const rawReviewsCount = (appDetails as any).raw_reviews_count ?? appDetails.reviewsCount ?? (idx === 0 ? 320 : 85 - idx * 5);
+    // 市場シェア指標 (実データバインド: votesCount, followers_count, reviewsCount)
+    const rawVotes = (appDetails as any).followers_count ?? (appDetails as any).followersCount ?? appDetails.votesCount;
+    const rawRevs = (appDetails as any).raw_reviews_count ?? (appDetails as any).rawReviewsCount ?? appDetails.reviewsCount;
+    const followersCount = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
+    const rawReviewsCount = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
 
     // 【Directive 2】市場シェア正規化: Sqrt / Log スケールによる惑星半径動的計算 (16px 〜 44px)
-    const marketVolume = Math.max(0, followersCount) + Math.max(0, rawReviewsCount) * 2;
+    const marketVolume = (followersCount || 0) + (rawReviewsCount || 0) * 2;
     let radius: number;
     if (marketVolume > 0) {
       // Sqrt スケールで巨大企業が画面を占有しないよう正規化
