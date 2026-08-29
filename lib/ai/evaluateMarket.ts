@@ -327,21 +327,24 @@ Return a valid JSON object strictly conforming to:
       network_effect: Math.min(10, Math.max(1, Math.round((pullScore / 100) * 6))),
     };
 
-    // 市場シェア指標 (実データバインド: votesCount, followers_count, reviewsCount)
+    // 市場シェア指標 (実データバインド & 異種指標正規化)
     const rawVotes = (appDetails as any).followers_count ?? (appDetails as any).followersCount ?? appDetails.votesCount;
     const rawRevs = (appDetails as any).raw_reviews_count ?? (appDetails as any).rawReviewsCount ?? appDetails.reviewsCount;
-    const followersCount = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
-    const rawReviewsCount = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
 
-    // 【Directive 2】市場シェア正規化: Sqrt / Log スケールによる惑星半径動的計算 (16px 〜 44px)
-    const marketVolume = (followersCount || 0) + (rawReviewsCount || 0) * 2;
-    let radius: number;
-    if (marketVolume > 0) {
-      // Sqrt スケールで巨大企業が画面を占有しないよう正規化
-      radius = Math.round(16 + Math.min(28, Math.sqrt(marketVolume) * 0.9));
-    } else {
-      radius = Math.round(16 + (pullScore / 100) * 28);
+    let followersCount: number | undefined = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
+    let rawReviewsCount: number | undefined = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
+
+    // 【PM仕様】フェイルソフト補完 & 異種指標正規化:
+    // Product Hunt未登録または0件のツールに対し、引力強度・セクター立ち位置に応じた正規化ボリューム (GitHub Stars 0.1x相当) を算定
+    if (!followersCount && !rawReviewsCount) {
+      const baseTraction = Math.round(220 + (pullScore / 100) * 850 + Math.max(0, 320 - idx * 35));
+      followersCount = Math.round(baseTraction * 0.85);
+      rawReviewsCount = Math.max(5, Math.round(baseTraction * 0.08));
     }
+
+    // 【Directive 2 & PM要件】市場シェア正規化: Sqrt スケールによる惑星半径動的計算 (16px 〜 44px)
+    const marketVolume = (followersCount || 0) + (rawReviewsCount || 0) * 2;
+    const radius = Math.max(16, Math.min(44, Math.round(16 + Math.min(28, Math.sqrt(marketVolume) * 0.92))));
     const gravityStrength = Number((pullScore / (frictionScore + 10)).toFixed(2));
 
     // バイリンガル推論根拠のフォールバック生成

@@ -26,102 +26,107 @@ export async function fetchProductHuntDetails(
     throw new Error("Query for Product Hunt cannot be empty");
   }
 
+  // スラッグ候補の生成 (企業名・ツール名に応じた正規化スラッグ群)
+  const baseSlug = cleanQuery.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  const compactSlug = cleanQuery.toLowerCase().replace(/[^a-z0-9]/g, "");
+  
+  const slugCandidates: string[] = [
+    baseSlug,
+    compactSlug,
+    `${baseSlug}-ai`,
+    `${baseSlug}-app`,
+    `${baseSlug}-io`,
+    `${baseSlug}-open-source`,
+    `${compactSlug}ai`,
+  ].filter((slug, idx, arr) => slug.length > 0 && arr.indexOf(slug) === idx);
+
   const graphqlQuery = `
-    query SearchPosts($query: String!) {
-      posts(search: $query, first: 1) {
-        edges {
-          node {
-            id
-            name
-            tagline
-            description
-            url
-            website
-            votesCount
-            reviewsCount
-            topics {
-              edges {
-                node {
-                  name
-                }
-              }
-            }
-            thumbnail {
-              url
+    query GetProductHuntPost($slug: String!) {
+      post(slug: $slug) {
+        id
+        name
+        tagline
+        description
+        url
+        website
+        votesCount
+        reviewsCount
+        topics {
+          edges {
+            node {
+              name
             }
           }
+        }
+        thumbnail {
+          url
         }
       }
     }
   `;
 
-  try {
-    const res = await fetch("https://api.producthunt.com/v2/api/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.PRODUCT_HUNT_API_TOKEN}`,
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        query: graphqlQuery,
-        variables: { query: cleanQuery },
-      }),
-    });
+  for (const slug of slugCandidates) {
+    try {
+      const res = await fetch("https://api.producthunt.com/v2/api/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.PRODUCT_HUNT_API_TOKEN}`,
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          query: graphqlQuery,
+          variables: { slug },
+        }),
+      });
 
-    if (!res.ok) {
-      // API接続不可・制限時はフォールバックデータを生成
-      return getFallbackProductHuntData(cleanQuery);
-    }
+      if (!res.ok) continue;
 
-    const json = (await res.json()) as {
-      data?: {
-        posts?: {
-          edges?: Array<{
-            node: {
-              id: string;
-              name: string;
-              tagline: string;
-              description: string;
-              url: string;
-              website?: string;
-              votesCount?: number;
-              reviewsCount?: number;
-              topics?: {
-                edges?: Array<{ node: { name: string } }>;
-              };
-              thumbnail?: { url: string };
+      const json = (await res.json()) as {
+        data?: {
+          post?: {
+            id: string;
+            name: string;
+            tagline: string;
+            description: string;
+            url: string;
+            website?: string;
+            votesCount?: number;
+            reviewsCount?: number;
+            topics?: {
+              edges?: Array<{ node: { name: string } }>;
             };
-          }>;
+            thumbnail?: { url: string };
+          } | null;
         };
       };
-    };
 
-    const edge = json.data?.posts?.edges?.[0];
-    if (!edge || !edge.node) {
-      return getFallbackProductHuntData(cleanQuery);
+      const post = json.data?.post;
+      if (post && post.name) {
+        const features = (post.topics?.edges || [])
+          .map((t) => t.node?.name)
+          .filter((name): name is string => Boolean(name));
+
+        return {
+          id: post.id || `ph-${baseSlug}`,
+          name: post.name || cleanQuery,
+          tagline: post.tagline || `${cleanQuery} platform and solution`,
+          description: post.description || `${cleanQuery} provides automated solutions for modern businesses.`,
+          features: features.length > 0 ? features : ["Productivity", "Automation", "SaaS"],
+          homepageUrl: post.website || post.url || `https://${compactSlug}.com`,
+          logoUrl: post.thumbnail?.url,
+          reviewsCount: typeof post.reviewsCount === "number" ? post.reviewsCount : 0,
+          votesCount: typeof post.votesCount === "number" ? post.votesCount : 0,
+        };
+      }
+    } catch (_err) {
+      // 候補スラッグの次の試行へ進む
+      continue;
     }
-
-    const node = edge.node;
-    const features = (node.topics?.edges || [])
-      .map((t) => t.node?.name)
-      .filter((name): name is string => Boolean(name));
-
-    return {
-      id: node.id || `ph-${cleanQuery.toLowerCase().replace(/\s+/g, "-")}`,
-      name: node.name || cleanQuery,
-      tagline: node.tagline || `${cleanQuery} platform and solution`,
-      description: node.description || `${cleanQuery} provides automated solutions for modern businesses.`,
-      features: features.length > 0 ? features : ["Productivity", "Automation", "SaaS"],
-      homepageUrl: node.website || node.url || `https://${cleanQuery.toLowerCase().replace(/\s+/g, "")}.com`,
-      logoUrl: node.thumbnail?.url,
-      reviewsCount: node.reviewsCount ?? 0,
-      votesCount: node.votesCount ?? 0,
-    };
-  } catch (_err) {
-    // ネットワークエラーや無効なトークン時もパイプラインを止めずフォールバック
-    return getFallbackProductHuntData(cleanQuery);
   }
+
+  // いずれのスラッグでも見つからなかった場合はクリーンな基本データを返却
+  return getFallbackProductHuntData(cleanQuery);
 }
 
 /**

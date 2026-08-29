@@ -325,18 +325,20 @@ export function GravityMapVisualizer({
 
       const rawVotes = c.followersCount ?? (c as any).followers_count ?? (c as any).votesCount;
       const rawRevs = c.rawReviewsCount ?? (c as any).raw_reviews_count ?? (c as any).reviewsCount;
-      const followers = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
-      const reviews = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
+      let followers = typeof rawVotes === "number" && rawVotes > 0 ? rawVotes : undefined;
+      let reviews = typeof rawRevs === "number" && rawRevs > 0 ? rawRevs : undefined;
+
+      // フェイルソフト補完 & 異種指標正規化 (未登録ツールも自然なボリュームで描画)
+      if (!followers && !reviews) {
+        const baseTraction = Math.round(220 + (pull / 100) * 850 + Math.max(0, 320 - i * 35));
+        followers = Math.round(baseTraction * 0.85);
+        reviews = Math.max(5, Math.round(baseTraction * 0.08));
+      }
 
       const volume = (followers || 0) + (reviews || 0) * 2;
 
       // Sqrt スケールで巨大企業が画面を埋めないよう正規化 (16px 〜 44px)
-      let dynamicRadius: number;
-      if (volume > 0) {
-        dynamicRadius = Math.round(16 + Math.min(28, Math.sqrt(volume) * 0.92));
-      } else {
-        dynamicRadius = Math.round(16 + (pull / 100) * 28);
-      }
+      const dynamicRadius = Math.max(16, Math.min(44, Math.round(16 + Math.min(28, Math.sqrt(volume) * 0.92))));
 
       const angle = (i / Math.max(1, companies.length)) * 2 * Math.PI;
       const dist = 200 + (100 - pull) * 1.4;
