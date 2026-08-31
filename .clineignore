@@ -1,0 +1,47 @@
+# ==============================================================================
+# Cline / Roo-Code Ignore Rules (.clineignore)
+# AIエージェントの読み取りおよび外部API送信を防止する定義
+# ==============================================================================
+
+# 1. 機密環境変数・認証トークン・秘密鍵
+.env
+.env.local
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+service-account*.json
+credentials.json
+*secret*
+*token*
+
+# 2. パッケージ依存とビルド成果物
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+package-lock.json
+
+# 3. ログ・テストスクリーンショット・メディア
+*.log
+test-screenshots/
+coverage/
+.nyc_output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.ico
+*.mp4
+*.pdf
+
+# 4. バージョン管理メタデータ
+.git/

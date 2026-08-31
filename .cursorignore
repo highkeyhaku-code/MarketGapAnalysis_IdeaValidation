@@ -1,0 +1,47 @@
+# ==============================================================================
+# Cursor / AI Assistant Ignore Rules (.cursorignore)
+# AIコンテキストへの混入・外部送信を遮断するファイル定義
+# ==============================================================================
+
+# 1. 環境変数・シークレット・認証情報（最重要：完全遮断）
+.env
+.env.local
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+service-account*.json
+credentials.json
+*secret*
+*token*
+
+# 2. 巨大依存関係・ビルドキャッシュ（コンテキスト枯渇防止）
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+package-lock.json
+
+# 3. ログ・テスト成果物・バイナリ
+*.log
+test-screenshots/
+coverage/
+.nyc_output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.ico
+*.mp4
+*.pdf
+
+# 4. Git内部データ
+.git/

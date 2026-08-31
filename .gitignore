@@ -1,3 +1,4 @@
+# 内部設計書・コンテキストドキュメント
 PROJECT_CONTEXT.md
 環境構築.md
 overall-uiux-architecture-design-record.md
@@ -5,11 +6,54 @@ system-architecture-design-record.md
 phase2-validate-design-record.md
 phase1-discover-design-record.md
 
+# 環境変数・機密設定ファイル（.env.example のみリポジトリ追跡を許可）
+.env
 .env.local
-.env*.local
+.env.*.local
 .env.*
-node_modules
+*.env
+!.env.example
+
+# 秘密鍵・証明書・クレデンシャル
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+service-account*.json
+credentials.json
+*_secret*
+*secret*.json
+
+# 依存パッケージおよびビルド成果物
+node_modules/
 .next/
 out/
+build/
+dist/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# ログファイル
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# テスト成果物・スクリーンショット・キャッシュ
+test-screenshots/
+coverage/
+.nyc_output/
+.turbo/
+
+# OS・エディタ固有ファイル
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

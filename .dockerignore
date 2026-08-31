@@ -1,0 +1,57 @@
+# 依存関係およびビルド成果物
+node_modules
+.next
+out
+build
+dist
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Git
+.git
+.gitignore
+
+# 環境変数・機密情報（コンテナビルドに秘密情報を埋め込まない）
+.env
+.env.local
+.env.*.local
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+id_rsa*
+service-account*.json
+credentials.json
+
+# ログファイル
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# テスト・一時ファイル
+test-screenshots
+coverage
+.nyc_output
+.turbo
+
+# IDE・エディタ・AI設定
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.cursorignore
+.clineignore
+.agyignore
+.aidigestignore
+
+# Docker 関連ファイル（自身のコピー防止）
+Dockerfile*
+docker-compose*
+.dockerignore
