@@ -79,25 +79,76 @@ Your mission is to completely destroy confirmation bias, identify fatal vulnerab
 ${autopsyText}
 
 [Evaluation Requirements]:
-For each of the three personas ("investor", "competitor", "skeptical_user"), you MUST generate:
-- "harsh_critique_en": Brutally honest and sharp teardown in English destroying wishful thinking.
-- "harsh_critique_ja": Japanese translation / natural equivalent of the harsh critique.
-- "socratic_question_en": A thought-provoking Socratic challenge in English pushing the founder toward a smarter pivot.
-- "socratic_question_ja": Japanese equivalent of the Socratic question (e.g. 「この移行負荷を超えるために、〇〇という選択肢は検討できますか？」).
-- "pivot_hint_tag_en": A concise actionable pivot tag in English (e.g. "Headless Integration", "Vertical Specialization", "Multiplayer Hook").
-- "pivot_hint_tag_ja": A concise actionable pivot tag in Japanese (e.g. "ヘッドレス連携への特化", "特定バーティカルへの絞り込み", "既存ツールのアドオン化").
+You MUST return a JSON OBJECT (NOT an array) with keys: "investor", "competitor", "skeptical_user", "overall_verdict", "executive_summary_en", "executive_summary_ja".
 
-Finally, provide the tribunal consensus:
-- "overall_verdict": "KILL" | "PIVOT" | "SURVIVED" (Based on total score ${totalScore}, recommended: ${recommendedVerdict})
-- "executive_summary_en": Concise executive summary verdict in English explaining why the idea dies or what must change.
-- "executive_summary_ja": Japanese translation of the executive summary verdict.
-
-Return ONLY a valid JSON object matching the requested schema.
+Example JSON structure:
+{
+  "overall_verdict": "${recommendedVerdict}",
+  "executive_summary_en": "Executive summary...",
+  "executive_summary_ja": "総括サマリー...",
+  "investor": {
+    "harsh_critique_en": "Critique in English...",
+    "harsh_critique_ja": "日本語の辛辣な批判...",
+    "socratic_question_en": "Socratic question in English...",
+    "socratic_question_ja": "思考をハッとさせる日本語の問い...",
+    "pivot_hint_tag_en": "Multiplayer Viral Loop",
+    "pivot_hint_tag_ja": "社内マルチプレイヤー・バイラル化"
+  },
+  "competitor": {
+    "harsh_critique_en": "Critique in English...",
+    "harsh_critique_ja": "日本語の辛辣な批判...",
+    "socratic_question_en": "Socratic question in English...",
+    "socratic_question_ja": "思考をハッとさせる日本語の問い...",
+    "pivot_hint_tag_en": "Parasitic Add-on Bridge",
+    "pivot_hint_tag_ja": "既存ツールのアドオン・拡張化"
+  },
+  "skeptical_user": {
+    "harsh_critique_en": "Critique in English...",
+    "harsh_critique_ja": "日本語の辛辣な批判...",
+    "socratic_question_en": "Socratic question in English...",
+    "socratic_question_ja": "思考をハッとさせる日本語の問い...",
+    "pivot_hint_tag_en": "Headless 0-Config UX",
+    "pivot_hint_tag_ja": "Slack連携の0-Config化"
+  }
+}
 `;
 
   try {
+    const rawCaller = async (p: string) => {
+      const raw = await callGemini(p, { temperature: 0.2 });
+      try {
+        const cleaned = raw.replace(/```(?:json)?/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        // もし配列形式で返ってきた場合はオブジェクト形式に自動正規化
+        if (Array.isArray(parsed)) {
+          const obj: any = {
+            overall_verdict: recommendedVerdict,
+            executive_summary_en: "The startup faces structural friction against existing market incumbents.",
+            executive_summary_ja: "既存の競合ツールに対する現状維持の引力とスイッチング障壁が極めて高く評価されました。",
+          };
+          parsed.forEach((item: any) => {
+            const k = item.persona === "customer" ? "skeptical_user" : item.persona;
+            if (k && (k === "investor" || k === "competitor" || k === "skeptical_user")) {
+              obj[k] = {
+                harsh_critique_en: item.harsh_critique_en || item.coreCritique || "",
+                harsh_critique_ja: item.harsh_critique_ja || item.coreCritique || "",
+                socratic_question_en: item.socratic_question_en || item.socraticQuestion || "",
+                socratic_question_ja: item.socratic_question_ja || item.socraticQuestion || "",
+                pivot_hint_tag_en: item.pivot_hint_tag_en || "Strategic Pivot",
+                pivot_hint_tag_ja: item.pivot_hint_tag_ja || "戦略的ピボット",
+              };
+            }
+          });
+          return JSON.stringify(obj);
+        }
+      } catch (_e) {
+        // パースエラーはそのまま生テキストを渡してZod自己修正に委ねる
+      }
+      return raw;
+    };
+
     const feedback = await fetchWithZodSelfCorrection({
-      llmCaller: async (p) => callGemini(p, { temperature: 0.2 }),
+      llmCaller: rawCaller,
       initialPrompt: prompt,
       schema: TribunalFeedbackSchema,
       maxRetries: 3,

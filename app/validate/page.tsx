@@ -264,6 +264,11 @@ function ValidateContent() {
               jobId={activeJobId}
               onComplete={handleJobComplete}
               onError={(err) => console.error("Crash job failed:", err)}
+              onRetry={() => {
+                setActiveJobId(null);
+                setCreatedCommitId(null);
+              }}
+              timeoutSeconds={180}
             />
           </div>
         ) : (
