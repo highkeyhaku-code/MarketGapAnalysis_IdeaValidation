@@ -1,6 +1,6 @@
 "use client";
 
-import { create } from "zustand";
+import { useSyncExternalStore } from "react";
 import { computeCommitTreeVersions, CommitMinimal } from "../versioning";
 import { IdeaInput } from "../../schemas/zod";
 
@@ -40,7 +40,57 @@ export interface IdeaStoreState {
   getRestoredInputValues: (commitId: string) => Partial<IdeaInput> | null;
 }
 
-export const useIdeaStore = create<IdeaStoreState>((set, get) => ({
+/**
+ * ゼロ外部依存の React 18/19 対応型安全ストアファクトリ (useSyncExternalStore 準拠)
+ * Docker ボリュームマウントや環境差異による npm パッケージ未解決エラーを完全に排除します。
+ */
+function createStore<T extends object>(
+  initializer: (
+    set: (partial: Partial<T> | ((state: T) => Partial<T>)) => void,
+    get: () => T
+  ) => T
+) {
+  let state: T;
+  const listeners = new Set<() => void>();
+
+  const getState = () => state;
+
+  const setState = (partial: Partial<T> | ((prevState: T) => Partial<T>)) => {
+    const nextPartial = typeof partial === "function" ? partial(state) : partial;
+    state = { ...state, ...nextPartial };
+    listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (err) {
+        console.error("Store listener error:", err);
+      }
+    });
+  };
+
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+
+  state = initializer(setState, getState);
+
+  function useStore(): T;
+  function useStore<U>(selector: (state: T) => U): U;
+  function useStore<U>(selector?: (state: T) => U): U | T {
+    const getSnapshot = () => (selector ? selector(state) : state);
+    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  }
+
+  useStore.getState = getState;
+  useStore.setState = setState;
+  useStore.subscribe = subscribe;
+
+  return useStore;
+}
+
+export const useIdeaStore = createStore<IdeaStoreState>((set, get) => ({
   currentIdeaId: null,
   active_commit_id: null,
   viewing_commit_id: null,
@@ -52,7 +102,7 @@ export const useIdeaStore = create<IdeaStoreState>((set, get) => ({
 
   setIdeaContext: (ideaId, activeCommitId, commits) => {
     const versionMap = computeCommitTreeVersions(commits, activeCommitId);
-    
+
     // active_commit_id が未設定の場合は最新のコミットを採用
     const resolvedActiveId =
       activeCommitId ||
