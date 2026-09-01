@@ -81,17 +81,31 @@ export async function POST(req: NextRequest) {
       throw new Error(`Failed to insert idea_commit: ${commitErr.message}`);
     }
 
-    // 5. ideas テーブルの active_commit_id (HEAD) を最新コミットIDに更新
-    const { error: updateHeadErr } = await supabaseAdmin
-      .from("ideas")
-      .update({
-        active_commit_id: commitId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", ideaId);
+    // 5. ideas テーブルの active_commit_id (HEAD) を最新コミットIDに更新 (フェイルソフト)
+    try {
+      const { error: updateHeadErr } = await supabaseAdmin
+        .from("ideas")
+        .update({
+          active_commit_id: commitId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", ideaId);
 
-    if (updateHeadErr) {
-      console.warn(`[API /api/ideas/commit] Warning updating ideas.active_commit_id for idea ${ideaId}:`, updateHeadErr);
+      if (updateHeadErr) {
+        console.warn(
+          `[API /api/ideas/commit] Notice: active_commit_id update not applied (column may not exist yet in DB):`,
+          updateHeadErr.message
+        );
+        // カラムが存在しない場合は updated_at のみ更新
+        await supabaseAdmin
+          .from("ideas")
+          .update({
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", ideaId);
+      }
+    } catch (_err) {
+      // 外部キーまたはスキーマ不一致時の安全な早期パス
     }
 
     // 4. 初期 job_status を作成
