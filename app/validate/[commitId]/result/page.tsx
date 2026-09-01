@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { EmotionalNutritionLabel } from "../../../../components/EmotionalNutritionLabel";
 import { VSCardBoard } from "../../../../components/VSCardBoard";
+import { DetachedHeadStickyBanner } from "../../../../components/DetachedHeadStickyBanner";
+import { useIdeaStore } from "../../../../lib/store/useIdeaStore";
 import {
   GravityMapVisualizer,
   GravityMapData,
@@ -45,6 +47,8 @@ export default function ValidationResultPage() {
   const [showPivotToast, setShowPivotToast] = useState(false);
   const [activeViewTab, setActiveViewTab] = useState<"crash_report" | "gravity_map">("crash_report");
 
+  const { active_commit_id, setIdeaContext, setViewingCommit, checkoutLatest } = useIdeaStore();
+
   useEffect(() => {
     if (!commitId) return;
 
@@ -54,10 +58,32 @@ export default function ValidationResultPage() {
         const res = await fetch(`/api/ideas/commit/${commitId}`);
         const json = await res.json();
         if (json.success && json.commit) {
-          setCommitData(json.commit);
-          const score = json.commit.emotional_score ?? 60;
+          const c = json.commit;
+          setCommitData(c);
+          const score = c.emotional_score ?? 60;
           if (score < 50) {
             setShowPivotToast(true);
+          }
+
+          // アイデア親情報と全コミット群を取得して Zustand ストアにセット
+          if (c.idea_id) {
+            try {
+              const ideasRes = await fetch("/api/ideas");
+              const ideasJson = await ideasRes.json();
+              if (ideasJson.success && Array.isArray(ideasJson.ideas)) {
+                const currentIdea = ideasJson.ideas.find((i: any) => i.id === c.idea_id);
+                if (currentIdea) {
+                  setIdeaContext(
+                    currentIdea.id,
+                    currentIdea.active_commit_id,
+                    currentIdea.idea_commits || [c]
+                  );
+                  setViewingCommit(commitId);
+                }
+              }
+            } catch (treeErr) {
+              console.warn("Failed to load idea commits tree for store:", treeErr);
+            }
           }
         } else {
           setErrorMessage(json.error || `Commit "${commitId}" was not found.`);
@@ -71,7 +97,14 @@ export default function ValidationResultPage() {
     };
 
     fetchCommit();
-  }, [commitId]);
+  }, [commitId, setIdeaContext, setViewingCommit]);
+
+  const handleCheckoutLatest = () => {
+    checkoutLatest();
+    if (active_commit_id && active_commit_id !== commitId) {
+      router.push(`/validate/${active_commit_id}/result`);
+    }
+  };
 
   if (loading) {
     return (
@@ -298,6 +331,9 @@ export default function ValidationResultPage() {
           </div>
         </div>
       </header>
+
+      {/* 4. Detached HEAD Sticky フローティングヘッダー (過去バージョン閲覧時) */}
+      <DetachedHeadStickyBanner onCheckoutLatest={handleCheckoutLatest} />
 
       {/* メイン検証レポート */}
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">

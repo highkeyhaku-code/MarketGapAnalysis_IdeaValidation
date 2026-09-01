@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { IdeaWizard } from "../../components/IdeaWizard";
 import { JobPollingTracker } from "../../components/JobPollingTracker";
+import { DetachedHeadStickyBanner } from "../../components/DetachedHeadStickyBanner";
+import { useIdeaStore } from "../../lib/store/useIdeaStore";
 import { IdeaInput, PhysicalElement } from "../../schemas/zod";
 import { PivotSuggestionResponse } from "../api/ideas/pivot-suggestion/route";
 
@@ -56,6 +58,8 @@ function ValidateContent() {
     }
   }, [pivotFrom, targetPainQuery, solutionQuery, coreEdgeQuery, targetLiteracyQuery]);
 
+  const { isDetachedHead, viewingVersion, activeVersion, active_commit_id, setIdeaContext, setViewingCommit, checkoutLatest } = useIdeaStore();
+
   // Time-Travel: 過去のコミットから状態を復元 & ピボット提案を生成 (設計書 3.3)
   useEffect(() => {
     if (!pivotFrom) return;
@@ -77,6 +81,27 @@ function ValidateContent() {
             q4_supplementary_pains: c.q4_supplementary_pains || [],
           };
           setInitialValues(restoredValues);
+
+          // アイデア親情報と全コミット群を取得して Zustand ストアにセット
+          if (c.idea_id) {
+            try {
+              const ideasRes = await fetch("/api/ideas");
+              const ideasJson = await ideasRes.json();
+              if (ideasJson.success && Array.isArray(ideasJson.ideas)) {
+                const currentIdea = ideasJson.ideas.find((i: any) => i.id === c.idea_id);
+                if (currentIdea) {
+                  setIdeaContext(
+                    currentIdea.id,
+                    currentIdea.active_commit_id,
+                    currentIdea.idea_commits || [c]
+                  );
+                  setViewingCommit(pivotFrom);
+                }
+              }
+            } catch (treeErr) {
+              console.warn("Failed to load idea commits tree for store:", treeErr);
+            }
+          }
 
           // 3.3 LLM自動生成のピボット提案 (Diffハイライト) を取得
           try {
@@ -104,7 +129,17 @@ function ValidateContent() {
     };
 
     fetchPivotSourceAndSuggestion();
-  }, [pivotFrom, targetCraterParam]);
+  }, [pivotFrom, targetCraterParam, setIdeaContext, setViewingCommit]);
+
+  // 最新状態へ即時復帰 (Checkout HEAD)
+  const handleCheckoutLatest = () => {
+    checkoutLatest();
+    if (active_commit_id && active_commit_id !== pivotFrom) {
+      router.push(`/validate?pivotFrom=${active_commit_id}`);
+    } else {
+      router.push("/validate");
+    }
+  };
 
   // ピボット案の適用ハンドラ
   const handleApplyPivotDiff = () => {
@@ -201,6 +236,9 @@ function ValidateContent() {
         </div>
       </header>
 
+      {/* 4. Detached HEAD Sticky フローティングヘッダー (過去バージョン閲覧時) */}
+      <DetachedHeadStickyBanner onCheckoutLatest={handleCheckoutLatest} />
+
       {/* メインエリア */}
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {/* タイトルヘッダー */}
@@ -284,6 +322,7 @@ function ValidateContent() {
           <IdeaWizard
             key={`${pivotFrom || "fresh"}-${JSON.stringify(initialValues)}`}
             initialValues={initialValues}
+            isRestoredFromPastCommit={Boolean(pivotFrom)}
             onSubmit={handleWizardSubmit}
             isSubmitting={isSubmitting}
           />

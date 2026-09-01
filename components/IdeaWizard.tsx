@@ -30,6 +30,7 @@ import { PreviewSummary } from "../app/api/validate/preview-summary/route";
 
 export interface IdeaWizardProps {
   initialValues?: Partial<IdeaInput>;
+  isRestoredFromPastCommit?: boolean;
   onSubmit: (data: IdeaInput & { detectedElements?: PhysicalElement[]; previewSummary?: PreviewSummary | null }) => void;
   isSubmitting?: boolean;
 }
@@ -62,6 +63,7 @@ const PHYSICAL_ELEMENT_LABELS: Record<PhysicalElement, { label: string; desc: st
  */
 export function IdeaWizard({
   initialValues,
+  isRestoredFromPastCommit = false,
   onSubmit,
   isSubmitting = false,
 }: IdeaWizardProps) {
@@ -272,11 +274,20 @@ export function IdeaWizard({
             </div>
 
             <div className="space-y-2">
+              {isRestoredFromPastCommit && (
+                <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] font-mono w-fit animate-in fade-in">
+                  <span>🍃 過去の回答から復元されました</span>
+                </div>
+              )}
               <textarea
                 {...register("q1_target_pain")}
                 rows={5}
                 placeholder="例: 中小企業のリモート営業チームにおいて、各担当者がCRM（HubSpot等）の入力とワークフロー設定に1日2時間以上浪費しており、導入後3ヶ月で入力の形骸化とリード情報の欠落が多発している..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition leading-relaxed"
+                className={`w-full border rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition leading-relaxed ${
+                  isRestoredFromPastCommit
+                    ? "bg-amber-950/20 border-amber-500/40 focus:border-amber-400"
+                    : "bg-slate-950 border-slate-800 focus:border-indigo-500"
+                }`}
               />
               <div className="flex justify-between text-[11px] font-mono">
                 <span className={q1Value.length < 30 ? "text-amber-400" : "text-emerald-400"}>
@@ -343,11 +354,20 @@ export function IdeaWizard({
             </div>
 
             <div className="space-y-2">
+              {isRestoredFromPastCommit && (
+                <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] font-mono w-fit animate-in fade-in">
+                  <span>🍃 過去の回答から復元されました</span>
+                </div>
+              )}
               <textarea
                 {...register("q2_solution")}
                 rows={5}
                 placeholder="例: ZoomやGoogle Meetの商談音声をリアルタイム解析し、議事録要約・ネクストアクション・CRM項目を0クリックで全自動入力・同期するAIバックオフィスハブ..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition leading-relaxed"
+                className={`w-full border rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition leading-relaxed ${
+                  isRestoredFromPastCommit
+                    ? "bg-amber-950/20 border-amber-500/40 focus:border-amber-400"
+                    : "bg-slate-950 border-slate-800 focus:border-indigo-500"
+                }`}
               />
               <div className="flex justify-between text-[11px] font-mono">
                 <span className={q2Value.length < 30 ? "text-amber-400" : "text-emerald-400"}>
@@ -414,11 +434,20 @@ export function IdeaWizard({
             </div>
 
             <div className="space-y-2">
+              {isRestoredFromPastCommit && (
+                <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] font-mono w-fit animate-in fade-in">
+                  <span>🍃 過去の回答から復元されました</span>
+                </div>
+              )}
               <textarea
                 {...register("q3_core_edge")}
                 rows={4}
                 placeholder="例: 既存のSaaS APIと0-configで接続し、設定工数（SETUP_COST）をゼロにしつつ、ローカル実行により超低遅延（SPEED）を実現する。"
-                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition leading-relaxed"
+                className={`w-full border rounded-2xl p-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition leading-relaxed ${
+                  isRestoredFromPastCommit
+                    ? "bg-amber-950/20 border-amber-500/40 focus:border-amber-400"
+                    : "bg-slate-950 border-slate-800 focus:border-indigo-500"
+                }`}
               />
               <div className="flex justify-between text-[11px] font-mono">
                 <span className={q3Value.length < 20 ? "text-amber-400" : "text-emerald-400"}>

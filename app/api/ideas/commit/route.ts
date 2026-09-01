@@ -20,7 +20,22 @@ export async function POST(req: NextRequest) {
     const userId = await getDefaultOrAuthUserId(providedUserId);
     let ideaId = providedIdeaId;
 
-    // 2. アイデア親レコードが存在しない場合は新規作成
+    // 2. ピボット時の ideaId 解決 (親コミットから親の idea_id を自動取得)
+    if (parentCommitId) {
+      const { data: parentCommit, error: parentErr } = await supabaseAdmin
+        .from("idea_commits")
+        .select("id, idea_id")
+        .eq("id", parentCommitId)
+        .single();
+
+      if (parentErr || !parentCommit) {
+        console.warn(`[API /api/ideas/commit] Parent commit ${parentCommitId} lookup failed:`, parentErr);
+      } else {
+        ideaId = parentCommit.idea_id;
+      }
+    }
+
+    // 3. 親コミットも既存 ideaId もない完全新規時のみ ideas 親レコードを作成
     if (!ideaId) {
       const { data: newIdea, error: ideaErr } = await supabaseAdmin
         .from("ideas")
@@ -42,7 +57,7 @@ export async function POST(req: NextRequest) {
     const commitId = crypto.randomUUID();
     const jobId = crypto.randomUUID();
 
-    // 3. idea_commits にイミュータブルな新規コミットを INSERT
+    // 4. idea_commits にイミュータブルな新規コミットを INSERT
     const { error: commitErr } = await supabaseAdmin.from("idea_commits").insert({
       id: commitId,
       idea_id: ideaId,
@@ -64,6 +79,19 @@ export async function POST(req: NextRequest) {
     if (commitErr) {
       console.error("[API /api/ideas/commit] Error inserting idea_commit:", commitErr);
       throw new Error(`Failed to insert idea_commit: ${commitErr.message}`);
+    }
+
+    // 5. ideas テーブルの active_commit_id (HEAD) を最新コミットIDに更新
+    const { error: updateHeadErr } = await supabaseAdmin
+      .from("ideas")
+      .update({
+        active_commit_id: commitId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ideaId);
+
+    if (updateHeadErr) {
+      console.warn(`[API /api/ideas/commit] Warning updating ideas.active_commit_id for idea ${ideaId}:`, updateHeadErr);
     }
 
     // 4. 初期 job_status を作成

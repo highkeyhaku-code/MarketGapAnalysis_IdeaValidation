@@ -7,10 +7,10 @@ import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../lib/supabaseClie
  */
 export async function GET(_req: NextRequest) {
   try {
-    // ideas テーブルと最新の idea_commits を取得
+    // ideas テーブルと最新の idea_commits を取得 (active_commit_id も含む)
     const { data: ideas, error } = await supabaseAdmin
       .from("ideas")
-      .select("id, title, created_at, user_id, idea_commits(*)")
+      .select("id, title, active_commit_id, created_at, updated_at, user_id, idea_commits(*)")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -80,9 +80,24 @@ export async function POST(req: NextRequest) {
       throw new Error(`Failed to create draft commit: ${commitErr?.message}`);
     }
 
+    // 3. ideas.active_commit_id を作成した commitId (HEAD) に更新
+    const { data: updatedIdea, error: updateErr } = await supabaseAdmin
+      .from("ideas")
+      .update({
+        active_commit_id: commitId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", ideaId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      console.warn("[API /api/ideas POST] Warning updating active_commit_id:", updateErr);
+    }
+
     return NextResponse.json({
       success: true,
-      idea,
+      idea: updatedIdea || idea,
       commit,
     });
   } catch (error: unknown) {

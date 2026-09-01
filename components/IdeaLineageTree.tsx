@@ -147,7 +147,10 @@ export function IdeaLineageTree({
     // コミットアイコン / バージョン名
     nodeGroup
       .append("text")
-      .text((d) => `v${d.data.version || "1.0"}`)
+      .text((d) => {
+        const ver = String(d.data.version || "1");
+        return ver.startsWith("v") ? ver : `v${ver}`;
+      })
       .attr("dy", 4)
       .attr("text-anchor", "middle")
       .attr("fill", "#f8fafc")

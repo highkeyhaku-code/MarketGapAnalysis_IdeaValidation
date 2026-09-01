@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { IdeaWizard } from "./IdeaWizard";
 import { IdeaInput, PhysicalElement } from "../schemas/zod";
+import { computeCommitTreeVersions } from "../lib/versioning";
 
 export type KanbanColumnId = "DRAFT" | "DISCOVERED" | "VALIDATING" | "VALIDATED" | "ARCHIVED";
 
@@ -40,6 +41,8 @@ export interface KanbanCardItem {
   coreEdge: string;
   score?: number | null;
   version: string;
+  totalCommitsCount: number;
+  badgeText: string;
   columnId: KanbanColumnId;
   createdAt: string;
   jobId?: string;
@@ -100,7 +103,7 @@ export function TheGarageKanban() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // 1. 本番 DB からのアイデア・コミット一覧フェッチ
+  // 1. 本番 DB からのアイデア・コミット一覧フェッチ (HEAD active_commit_id 参照)
   useEffect(() => {
     const fetchIdeasFromDb = async () => {
       try {
@@ -114,37 +117,51 @@ export function TheGarageKanban() {
             const commits = idea.idea_commits || [];
             if (commits.length === 0) return;
 
-            // 最新コミットを採用
-            const latestCommit = commits[commits.length - 1];
+            // バージョン採番ツリーを計算
+            const versionMap = computeCommitTreeVersions(commits, idea.active_commit_id);
+
+            // ideas.active_commit_id が指し示す HEAD コミットを取得（未設定時は最新コミットにフォールバック）
+            let headCommit = idea.active_commit_id
+              ? commits.find((c: any) => c.id === idea.active_commit_id)
+              : null;
+            if (!headCommit) {
+              headCommit = commits[commits.length - 1];
+            }
+
+            const headVersion = versionMap.get(headCommit.id) || "v1";
+            const badgeText = `${headVersion} (Total ${commits.length} commit${commits.length > 1 ? "s" : ""})`;
+
             let columnId: KanbanColumnId = "DRAFT";
 
-            if (latestCommit.status === "completed" || latestCommit.status === "validated") {
+            if (headCommit.status === "completed" || headCommit.status === "validated") {
               columnId = "VALIDATED";
-            } else if (latestCommit.status === "analyzing") {
+            } else if (headCommit.status === "analyzing") {
               columnId = "VALIDATING";
-            } else if (latestCommit.status === "archived") {
+            } else if (headCommit.status === "archived") {
               columnId = "ARCHIVED";
             } else if (
-              latestCommit.q1_target_pain &&
-              latestCommit.q1_target_pain.length >= 30 &&
-              !latestCommit.q1_target_pain.startsWith("未定義")
+              headCommit.q1_target_pain &&
+              headCommit.q1_target_pain.length >= 30 &&
+              !headCommit.q1_target_pain.startsWith("未定義")
             ) {
               columnId = "DISCOVERED";
             }
 
             loadedCards.push({
-              id: latestCommit.id,
-              commitId: latestCommit.id,
+              id: headCommit.id,
+              commitId: headCommit.id,
               ideaId: idea.id,
-              title: idea.title || "Untitled Idea",
-              targetPain: latestCommit.q1_target_pain || "",
-              solution: latestCommit.q2_solution || "",
-              coreEdge: latestCommit.q3_core_edge || "",
-              score: latestCommit.emotional_score,
-              version: `v1.${commits.length - 1}`,
+              title: idea.title || headCommit.q1_target_pain?.slice(0, 40) || "Untitled Idea",
+              targetPain: headCommit.q1_target_pain || "",
+              solution: headCommit.q2_solution || "",
+              coreEdge: headCommit.q3_core_edge || "",
+              score: headCommit.emotional_score,
+              version: headVersion,
+              totalCommitsCount: commits.length,
+              badgeText,
               columnId,
-              createdAt: latestCommit.created_at ? new Date(latestCommit.created_at).toLocaleDateString() : "Just now",
-              parentCommitId: latestCommit.parent_commit_id,
+              createdAt: headCommit.created_at ? new Date(headCommit.created_at).toLocaleDateString() : "Just now",
+              parentCommitId: headCommit.parent_commit_id,
             });
           });
 
@@ -266,7 +283,9 @@ export function TheGarageKanban() {
           targetPain: json.commit.q1_target_pain,
           solution: json.commit.q2_solution,
           coreEdge: json.commit.q3_core_edge,
-          version: "v0.1",
+          version: "v1",
+          totalCommitsCount: 1,
+          badgeText: "v1 (Total 1 commit)",
           columnId: "DRAFT",
           createdAt: new Date().toLocaleDateString(),
         };
@@ -394,13 +413,19 @@ export function TheGarageKanban() {
                                 }`}
                               >
                                 {/* カードヘッダー */}
-                                <div className="flex items-center justify-between text-xs mb-2">
-                                  <span className="px-2 py-0.5 bg-slate-950 font-mono text-[10px] text-indigo-400 rounded-md border border-slate-800">
-                                    {card.version}
-                                  </span>
+                                <div className="flex items-center justify-between text-xs mb-2 gap-1.5">
+                                  <div className="flex items-center space-x-1.5 overflow-hidden">
+                                    <span
+                                      className="flex items-center space-x-1 px-2 py-0.5 bg-slate-950 font-mono text-[10px] text-indigo-300 rounded-md border border-slate-800 shadow-inner truncate"
+                                      title={`HEAD: ${card.version}, Total Commits: ${card.totalCommitsCount}`}
+                                    >
+                                      <GitBranch className="w-3 h-3 text-indigo-400 shrink-0" />
+                                      <span className="font-bold truncate">{card.badgeText || card.version}</span>
+                                    </span>
+                                  </div>
                                   {card.score !== null && card.score !== undefined && (
                                     <span
-                                      className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                      className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
                                         card.score >= 60
                                           ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
                                           : "bg-rose-500/10 text-rose-300 border border-rose-500/30"

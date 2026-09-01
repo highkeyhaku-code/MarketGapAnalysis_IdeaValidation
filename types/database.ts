@@ -262,6 +262,7 @@ export type Database = {
           id: string;
           user_id: string;
           title: string;
+          active_commit_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -269,6 +270,7 @@ export type Database = {
           id?: string;
           user_id: string;
           title: string;
+          active_commit_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -276,10 +278,19 @@ export type Database = {
           id?: string;
           user_id?: string;
           title?: string;
+          active_commit_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "ideas_active_commit_id_fkey";
+            columns: ["active_commit_id"];
+            isOneToOne: false;
+            referencedRelation: "idea_commits";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       idea_commits: {
         Row: {
