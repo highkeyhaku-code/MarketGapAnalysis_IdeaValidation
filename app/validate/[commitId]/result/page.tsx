@@ -97,6 +97,23 @@ export default function ValidationResultPage() {
     };
 
     fetchCommit();
+
+    // コミットがまだ検証中の場合は定期ポーリング
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/ideas/commit/${commitId}`);
+        const json = await res.json();
+        if (json.success && json.commit) {
+          const c = json.commit;
+          setCommitData(c);
+          if (c.status === "completed" || c.status === "failed") {
+            clearInterval(pollInterval);
+          }
+        }
+      } catch (_e) {}
+    }, 2500);
+
+    return () => clearInterval(pollInterval);
   }, [commitId, setIdeaContext, setViewingCommit]);
 
   const handleCheckoutLatest = () => {
@@ -112,6 +129,31 @@ export default function ValidationResultPage() {
         <div className="flex items-center space-x-3 text-indigo-400 animate-pulse">
           <Sparkles className="w-5 h-5 animate-spin" />
           <span>Decoding Reality Crash Report for commit {commitId?.slice(0, 8)}...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 検証中の場合のローディング進捗画面
+  if (commitData && (commitData.status === "analyzing" || commitData.status === "pending")) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center font-sans p-6">
+        <div className="max-w-lg w-full bg-slate-900/90 border border-purple-500/30 rounded-3xl p-8 text-center space-y-6 shadow-2xl animate-in fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mx-auto">
+            <Flame className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black text-slate-100">
+              ⚡ AI仮説クラッシュ検証を実行中...
+            </h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              コミット <span className="font-mono text-purple-300 font-bold">{commitId?.slice(0, 8)}</span> に対して、標的競合の摩擦解析、GitHub死骸追跡、3人のAI審査員による審査をリアルタイム実行しています（通常20〜30秒で完了します）。
+            </p>
+          </div>
+          <div className="flex items-center justify-center space-x-2 text-xs font-mono text-purple-400">
+            <Sparkles className="w-4 h-4 animate-spin" />
+            <span>Crunching parameters & generating Tribunal Verdict...</span>
+          </div>
         </div>
       </div>
     );

@@ -303,26 +303,43 @@ export function TheGarageKanban() {
     }
   };
 
-  // ウィザード完了時の反映
-  const handleWizardComplete = (data: IdeaInput & { detectedElements?: PhysicalElement[] }) => {
+  // ウィザード完了時の反映 (即時コミット作成 & 検証画面へシームレス遷移)
+  const handleWizardComplete = async (data: IdeaInput & { detectedElements?: PhysicalElement[] }) => {
     if (!editingCardForWizard) return;
-    setCards((prev) =>
-      prev.map((c) => {
-        if (c.id === editingCardForWizard.id) {
-          return {
-            ...c,
-            title: data.q1_target_pain.slice(0, 30) + "...",
-            targetPain: data.q1_target_pain,
-            solution: data.q2_solution,
-            coreEdge: data.q3_core_edge,
-            columnId: "DISCOVERED", // バリデーション完了で DISCOVERED に昇格
-          };
-        }
-        return c;
-      })
-    );
-    setEditingCardForWizard(null);
-    showToast("✨ ウィザード入力を保存し、DISCOVERED カラムへ移動しました！", "success");
+    try {
+      showToast("🚀 アイデアコミットを作成し、仮説クラッシュ検証を開始します...", "info");
+      
+      const res = await fetch("/api/ideas/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ideaInput: {
+            q1_target_pain: data.q1_target_pain,
+            q2_solution: data.q2_solution,
+            q3_core_edge: data.q3_core_edge,
+            q4_target_literacy: data.q4_target_literacy || "intermediate",
+            q4_monetization_model: data.q4_monetization_model || "subscription",
+            q4_supplementary_pains: data.q4_supplementary_pains || [],
+          },
+          ideaId: editingCardForWizard.ideaId,
+          parentCommitId: editingCardForWizard.commitId || null,
+          domain: "B2B_SME",
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success && json.commitId) {
+        setEditingCardForWizard(null);
+        showToast("⚡ 検証ジョブが正常にキックされました。結果画面へ遷移します...", "success");
+        // 検証結果・進捗画面へ即時ルーティング
+        router.push(`/validate/${json.commitId}/result`);
+      } else {
+        alert(`Failed to start validation: ${json.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      console.error("Failed to commit and validate from Kanban wizard:", err);
+      alert(`Network error starting validation: ${err.message}`);
+    }
   };
 
   const columns: KanbanColumnId[] = ["DRAFT", "DISCOVERED", "VALIDATING", "VALIDATED", "ARCHIVED"];
