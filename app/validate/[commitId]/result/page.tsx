@@ -166,8 +166,41 @@ export default function ValidationResultPage() {
   const payload = commitData?.q4_supplementary_pains || {};
   const scores = payload?.scores || {};
   const competitorProfile = payload?.competitorProfile || { incumbentName: "Incumbent Leader" };
-  const personas = payload?.personas || [];
+  const tribunal = payload?.tribunal || payload?.critique || null;
+  const personas = Array.isArray(payload?.personas) && payload.personas.length > 0
+    ? payload.personas
+    : tribunal
+    ? [
+        {
+          personaKey: "investor",
+          name: "Marcus Vance",
+          title: "General Partner @ Apex Capital",
+          avatarColor: "#ef4444",
+          verdict: tribunal.overall_verdict,
+          ...tribunal.investor,
+        },
+        {
+          personaKey: "competitor",
+          name: "Elena Rostova",
+          title: "VP of Product @ Incumbent Giant",
+          avatarColor: "#f59e0b",
+          verdict: tribunal.overall_verdict,
+          ...tribunal.competitor,
+        },
+        {
+          personaKey: "skeptical_user",
+          name: "David K.",
+          title: "Head of Operations @ Tier-1 Scaleup",
+          avatarColor: "#6366f1",
+          verdict: tribunal.overall_verdict,
+          ...tribunal.skeptical_user,
+        },
+      ]
+    : [];
   const githubAutopsy = payload?.githubAutopsy || { items: [] };
+
+  const overallVerdict = tribunal?.overall_verdict || (commitData?.emotional_score && commitData.emotional_score >= 70 ? "SURVIVED" : commitData?.emotional_score && commitData.emotional_score >= 40 ? "PIVOT" : "KILL");
+  const executiveSummaryJa = tribunal?.executive_summary_ja || "市場の厳しい構造的摩擦とスイッチング障壁が検出されました。";
 
   const overallScore = commitData?.emotional_score ?? scores?.emotionalScore ?? 62;
   const nutritionMetrics = scores?.nutritionMetrics || {
@@ -467,8 +500,49 @@ export default function ValidationResultPage() {
               </div>
             </div>
 
-            {/* 3人の懐疑的ペルソナ審査員フィードバック & ソクラテス式ツッコミ */}
-            <div className="space-y-4">
+            {/* 3人の懐疑的ペルソナ審査員フィードバック & ソクラテス式ツッコミ [設計書 2.4.1 / 2.7] */}
+            <div className="space-y-6">
+              {/* 審査会総意の引導バナー (Tribunal Verdict) */}
+              <div
+                className={`p-6 rounded-3xl border shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in ${
+                  overallVerdict === "KILL"
+                    ? "bg-rose-950/40 border-rose-500/40"
+                    : overallVerdict === "PIVOT"
+                    ? "bg-amber-950/40 border-amber-500/40"
+                    : "bg-emerald-950/40 border-emerald-500/40"
+                }`}
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center space-x-2">
+                    <span
+                      className={`px-2.5 py-1 text-xs font-mono font-black rounded-lg uppercase tracking-wider ${
+                        overallVerdict === "KILL"
+                          ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                          : overallVerdict === "PIVOT"
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                      }`}
+                    >
+                      TRIBUNAL VERDICT: {overallVerdict}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">3名のAI共同創業者・審査会総意</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-200 leading-relaxed">
+                    {executiveSummaryJa}
+                  </p>
+                </div>
+
+                <div className="shrink-0 flex items-center space-x-2">
+                  <button
+                    onClick={() => router.push(`/validate?pivotFrom=${commitId}`)}
+                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center space-x-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>このコミットからピボット</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <UserCheck className="w-5 h-5 text-indigo-400" />
@@ -486,6 +560,9 @@ export default function ValidationResultPage() {
                 {personas.map((p: any, idx: number) => {
                   const confidence = p.groundingConfidence || "HIGH";
                   const sourcesCount = p.groundingSourcesCount || 5;
+                  const critiqueText = p.harsh_critique_ja || p.coreCritique || p.harsh_critique_en || "";
+                  const socraticText = p.socratic_question_ja || p.socraticQuestion || p.socratic_question_en || "";
+                  const pivotTag = p.pivot_hint_tag_ja || p.pivot_hint_tag_en || "戦略的ピボット";
 
                   return (
                     <div
@@ -500,12 +577,12 @@ export default function ValidationResultPage() {
                           </div>
                           <span
                             className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg border uppercase ${
-                              p.verdict === "CRITICAL"
+                              (p.verdict || overallVerdict) === "CRITICAL" || (p.verdict || overallVerdict) === "KILL"
                                 ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
                                 : "bg-amber-500/10 border-amber-500/30 text-amber-300"
                             }`}
                           >
-                            {p.verdict}
+                            {p.verdict || overallVerdict}
                           </span>
                         </div>
 
@@ -519,35 +596,53 @@ export default function ValidationResultPage() {
                         </div>
 
                         <p className="text-xs text-slate-300 italic leading-relaxed">
-                          "{p.coreCritique}"
+                          "{critiqueText}"
                         </p>
 
-                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs space-y-1">
-                          <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
-                            Fatal Vulnerability (致命的欠陥)
-                          </span>
-                          <p className="text-[11px] text-rose-200">{p.fatalFlaw}</p>
-                        </div>
+                        {p.fatalFlaw && (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs space-y-1">
+                            <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
+                              Fatal Vulnerability (致命的欠陥)
+                            </span>
+                            <p className="text-[11px] text-rose-200">{p.fatalFlaw}</p>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                        <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
-                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
-                            Recommended Countermeasure
-                          </span>
-                          <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
-                        </div>
+                      <div className="space-y-3 pt-2 border-t border-slate-800/80">
+                        {p.recommendedCountermeasure && (
+                          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs space-y-1">
+                            <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
+                              Recommended Countermeasure
+                            </span>
+                            <p className="text-[11px] text-indigo-200">{p.recommendedCountermeasure}</p>
+                          </div>
+                        )}
 
-                        {/* 4-2. 対話型ツッコミUI (Socratic Dialogue Prompt) */}
-                        {p.socraticQuestion && (
-                          <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-xs space-y-1 animate-in fade-in">
+                        {/* 2.7 対話型ツッコミUI (Socratic Dialogue Prompt) & ピボットボタン */}
+                        {socraticText && (
+                          <div className="p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-2xl text-xs space-y-2.5 animate-in fade-in">
                             <div className="flex items-center space-x-1.5 text-purple-300 font-bold text-[10px] uppercase tracking-wider">
                               <Lightbulb className="w-3.5 h-3.5 text-purple-400" />
                               <span>Socratic Challenge (思考の足場)</span>
                             </div>
-                            <p className="text-[11px] text-purple-200 italic">
-                              "{p.socraticQuestion}"
+                            <p className="text-[11px] text-purple-200 italic leading-relaxed">
+                              "{socraticText}"
                             </p>
+
+                            {/* シームレス・ピボット CTA ボタン [設計書 2.7] */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const q = encodeURIComponent(socraticText);
+                                const tag = encodeURIComponent(pivotTag);
+                                router.push(`/validate?pivotFrom=${commitId}&focus=${p.personaKey || 'persona'}&socraticQuestion=${q}&pivotTag=${tag}`);
+                              }}
+                              className="w-full mt-2 py-2 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center space-x-1.5 cursor-pointer"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                              <span className="truncate">💡 "{pivotTag}" を軸にピボットする</span>
+                            </button>
                           </div>
                         )}
                       </div>

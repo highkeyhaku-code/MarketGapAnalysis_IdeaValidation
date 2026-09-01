@@ -28,6 +28,8 @@ function ValidateContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pivotFrom = searchParams.get("pivotFrom");
+  const socraticQuestion = searchParams.get("socraticQuestion");
+  const pivotTag = searchParams.get("pivotTag");
   const targetCraterParam = searchParams.get("targetCrater") || "未充足の深い摩擦領域";
   const targetPainQuery = searchParams.get("targetPain");
   const solutionQuery = searchParams.get("solution");
@@ -37,8 +39,6 @@ function ValidateContent() {
   const [loadingInitial, setLoadingInitial] = useState(Boolean(pivotFrom));
   const [initialValues, setInitialValues] = useState<Partial<IdeaInput> | undefined>(undefined);
   const [pivotCommitMeta, setPivotCommitMeta] = useState<any>(null);
-  const [pivotSuggestion, setPivotSuggestion] = useState<PivotSuggestionResponse | null>(null);
-  const [isApplyingDiff, setIsApplyingDiff] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [createdCommitId, setCreatedCommitId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,11 +60,11 @@ function ValidateContent() {
 
   const { isDetachedHead, viewingVersion, activeVersion, active_commit_id, setIdeaContext, setViewingCommit, checkoutLatest } = useIdeaStore();
 
-  // Time-Travel: 過去のコミットから状態を復元 & ピボット提案を生成 (設計書 3.3)
+  // Time-Travel: 過去のコミットから状態を復元 (設計書 2.7 / 3.3)
   useEffect(() => {
     if (!pivotFrom) return;
 
-    const fetchPivotSourceAndSuggestion = async () => {
+    const fetchPivotSource = async () => {
       try {
         setLoadingInitial(true);
         const res = await fetch(`/api/ideas/commit/${pivotFrom}`);
@@ -102,24 +102,6 @@ function ValidateContent() {
               console.warn("Failed to load idea commits tree for store:", treeErr);
             }
           }
-
-          // 3.3 LLM自動生成のピボット提案 (Diffハイライト) を取得
-          try {
-            const sugRes = await fetch("/api/ideas/pivot-suggestion", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                parentCommit: c,
-                targetCrater: targetCraterParam,
-              }),
-            });
-            const sugJson = await sugRes.json();
-            if (sugJson.success) {
-              setPivotSuggestion(sugJson);
-            }
-          } catch (sugErr) {
-            console.warn("Failed to fetch pivot suggestion:", sugErr);
-          }
         }
       } catch (err) {
         console.error("Failed to restore pivot commit:", err);
@@ -128,8 +110,8 @@ function ValidateContent() {
       }
     };
 
-    fetchPivotSourceAndSuggestion();
-  }, [pivotFrom, targetCraterParam, setIdeaContext, setViewingCommit]);
+    fetchPivotSource();
+  }, [pivotFrom, setIdeaContext, setViewingCommit]);
 
   // 最新状態へ即時復帰 (Checkout HEAD)
   const handleCheckoutLatest = () => {
@@ -139,18 +121,6 @@ function ValidateContent() {
     } else {
       router.push("/validate");
     }
-  };
-
-  // ピボット案の適用ハンドラ
-  const handleApplyPivotDiff = () => {
-    if (!pivotSuggestion) return;
-    setIsApplyingDiff(true);
-    setInitialValues((prev) => ({
-      ...prev,
-      q1_target_pain: pivotSuggestion.suggestedQ1,
-      q3_core_edge: pivotSuggestion.suggestedQ3,
-    }));
-    setTimeout(() => setIsApplyingDiff(false), 500);
   };
 
   // ウィザード送信ハンドラ
@@ -255,54 +225,32 @@ function ValidateContent() {
           </p>
         </div>
 
-        {/* 3.3 ピボット提案バナー (Diffハイライト表示) */}
-        {pivotSuggestion && (
-          <div className="p-6 bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-purple-950/70 border border-amber-500/40 rounded-3xl shadow-2xl space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-            <div className="flex items-start justify-between">
+        {/* 2.7 ソクラテス式対話バナー (Socratic Challenge: 思考の足場常駐) */}
+        {socraticQuestion && (
+          <div className="p-6 bg-gradient-to-br from-purple-950/80 via-slate-900/90 to-indigo-950/80 border border-purple-500/40 rounded-3xl shadow-2xl space-y-3 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Lightbulb className="w-5 h-5 text-amber-400 shrink-0" />
                 <div>
-                  <span className="text-[10px] font-mono font-bold uppercase text-amber-400 tracking-wider block">
-                    AI Strategic Pivot Recommendation (Time-Travel Diff)
+                  <span className="text-[10px] font-mono font-bold uppercase text-purple-300 tracking-wider block">
+                    🔄 戦略的ピボット進行中 {pivotTag ? `[ 💡 "${pivotTag}" ]` : ""}
                   </span>
-                  <p className="text-sm font-bold text-slate-100">
-                    {pivotSuggestion.pivotRationale}
-                  </p>
+                  <h3 className="text-sm font-bold text-slate-100">
+                    AI共同創業者・審査員からの問いかけ (思考の足場)
+                  </h3>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleApplyPivotDiff}
-                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center space-x-1.5 shrink-0"
-              >
-                <Sparkles className="w-4 h-4 text-slate-950" />
-                <span>{isApplyingDiff ? "適用中..." : "✨ このピボット案を採用する"}</span>
-              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-2 border-t border-slate-800/80">
-              {/* Q1 Diff */}
-              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-1.5">
-                <div className="flex items-center justify-between text-indigo-400 font-bold font-mono text-[11px]">
-                  <span>Target Pain 提案 (Q1)</span>
-                  <span className="text-slate-500 text-[10px]">{pivotSuggestion.diffQ1Explanation}</span>
-                </div>
-                <p className="text-slate-300 line-clamp-3 italic">
-                  "{pivotSuggestion.suggestedQ1}"
-                </p>
-              </div>
-
-              {/* Q3 Diff */}
-              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-1.5">
-                <div className="flex items-center justify-between text-purple-400 font-bold font-mono text-[11px]">
-                  <span>Core Edge 提案 (Q3)</span>
-                  <span className="text-slate-500 text-[10px]">{pivotSuggestion.diffQ3Explanation}</span>
-                </div>
-                <p className="text-slate-300 line-clamp-3 italic">
-                  "{pivotSuggestion.suggestedQ3}"
-                </p>
-              </div>
+            <div className="p-4 bg-slate-950/80 border border-purple-500/20 rounded-2xl">
+              <p className="text-xs text-purple-200 italic font-medium leading-relaxed">
+                "{socraticQuestion}"
+              </p>
             </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              ※ 確証バイアスを破壊しオーナーシップを保つため、AIによる回答の自動書き換えは行われません。上記の問いを手がかりに、以下のフォーム（Q1〜Q4）の回答をご自身で再構築してください。
+            </p>
           </div>
         )}
 

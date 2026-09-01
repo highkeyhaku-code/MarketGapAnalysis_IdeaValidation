@@ -215,3 +215,28 @@ export const WhatIfResponseSchema = z.object({
   cards: z.array(WhatIfCardItemSchema).min(1),
 });
 export type WhatIfResponseType = z.infer<typeof WhatIfResponseSchema>;
+
+// ==============================================================================
+// 6. AI審査員バイリンガル出力スキーマ (TribunalFeedbackSchema) [設計書 2.4.1]
+// ==============================================================================
+
+export const PersonaCritiqueSchema = z.object({
+  harsh_critique_en: z.string().describe("English: 容赦のない辛辣な批判。事実と論理で確証バイアスを破壊する。"),
+  harsh_critique_ja: z.string().describe("Japanese: 上記の日本語訳。"),
+  socratic_question_en: z.string().describe("English: 思考をハッとさせる鋭い問いかけ。"),
+  socratic_question_ja: z.string().describe("Japanese: 上記の日本語訳。"),
+  pivot_hint_tag_en: z.string().describe("English: ピボットボタンに表示する短いアクションタグ（例: Target Refinement）"),
+  pivot_hint_tag_ja: z.string().describe("Japanese: 上記の日本語訳。"),
+});
+export type PersonaCritique = z.infer<typeof PersonaCritiqueSchema>;
+
+export const TribunalFeedbackSchema = z.object({
+  investor: PersonaCritiqueSchema,
+  competitor: PersonaCritiqueSchema,
+  skeptical_user: PersonaCritiqueSchema,
+  overall_verdict: z.enum(["KILL", "PIVOT", "SURVIVED"]).describe("3人の総意としての判定"),
+  executive_summary_en: z.string().describe("English: なぜその判定になったのかを示す最終的な引導。"),
+  executive_summary_ja: z.string().describe("Japanese: 上記の日本語訳。"),
+});
+export type TribunalFeedback = z.infer<typeof TribunalFeedbackSchema>;
+

@@ -2,20 +2,24 @@ import { inngest, HypothesisCrashEventData } from "../client";
 import { supabaseAdmin } from "../../lib/supabaseClient";
 import { searchArchivedGithubProjects } from "../../lib/githubSearch";
 import { calculateDomainWeightedScores } from "../../lib/domainWeights";
-import { generateSkepticalPersonasFeedback } from "../../lib/ai/personas";
+import {
+  generateThreeSkepticalPersonasFeedback,
+  formatTribunalFeedbackForUI,
+} from "../../lib/ai/personas";
 import { fetchProductHuntDetails } from "../../lib/api/producthunt";
 import { fetchFrictionCorpusFromTavily } from "../../lib/api/tavily";
 import { compressFrictionCorpus } from "../../lib/compressFrictionCorpus";
 import { callGemini } from "../../lib/ai/gemini";
-import { PhysicalElement, DomainType } from "../../schemas/zod";
+import { PhysicalElement, DomainType, TribunalFeedback } from "../../schemas/zod";
 import { Json } from "../../types/database";
 
 /**
  * 非同期ジョブ: 仮説クラッシュ検証 (runHypothesisCrashJob)
+ * 設計書 5.1 & 2.4.1 / 2.7 準拠
  * - 429レート制限対策: concurrency limit = 10
  * - 自動リトライ: retries = 3
- * - 競合スペック解析 & GitHub 死骸検索 & 3xペナルティスコア計算 & 3ペルソナ審査
- * - job_status テーブルと idea_commits テーブルを更新
+ * - 競合スペック解析 & GitHub 死骸検索 & 3xペナルティスコア計算 & バイリンガル3ペルソナ審査 (TribunalFeedback)
+ * - 最終ステップ (save-final-results-and-checkout-head) で正常完了時のみ HEAD を安全に更新 (Checkout)
  */
 export const runHypothesisCrashJob = inngest.createFunction(
   {
@@ -148,39 +152,44 @@ Return a valid JSON object with the integer score for each key:
       };
     });
 
-    // (4) 3人の懐疑的なペルソナによる審査員フィードバック (85%)
-    const personasFeedback = await step.run("generate-personas-feedback", async () => {
+    // (4) 3人の懐疑的なペルソナによるバイリンガル審査員フィードバック (85%) [設計書 2.4 / 2.4.1]
+    const tribunalFeedback = await step.run("gemini-step2-pro-critique", async () => {
       await supabaseAdmin.from("job_status").update({
         percentage: 85,
-        status: "🔥 冷徹な投資家・競合・顧客による審査中...",
+        status: "🔥 冷徹な3人のAI審査員（投資家・競合・顧客）による審査中...",
       }).eq("id", jobId);
 
-      const feedback = await generateSkepticalPersonasFeedback({
+      const feedback = await generateThreeSkepticalPersonasFeedback({
         q1_target_pain: targetPain,
         q2_solution: solution,
         q3_core_edge: coreEdge,
         domain,
+        totalScore: penaltyScoreResult.emotionalScore,
         autopsyResults: githubCorpseResult,
       });
 
       return feedback;
     });
 
-    // (5) idea_commits および job_status の更新 & 完了 (100%)
-    const completionResult = await step.run("save-validation-results-and-complete", async () => {
+    // (5) DBへの書き込み、完了ステータス反映、および HEAD の自動Checkout (100%) [設計書 5.1 & 要件2]
+    const completionResult = await step.run("save-final-results-and-checkout-head", async () => {
+      const formattedPersonas = formatTribunalFeedbackForUI(tribunalFeedback);
+
       const fullValidationPayload = {
         competitorProfile,
         githubAutopsy: githubCorpseResult,
         scores: penaltyScoreResult,
-        personas: personasFeedback,
+        tribunal: tribunalFeedback, // TribunalFeedbackSchema 準拠のバイリンガル審査結果
+        critique: tribunalFeedback, // 互換性エイリアス
+        personas: formattedPersonas, // UI表示用配列
         validatedAt: new Date().toISOString(),
       };
 
-      // idea_commits のメタデータを更新
-      await supabaseAdmin.from("idea_commits").update({
+      // ① idea_commits のメタデータを更新
+      const { error: commitError } = await supabaseAdmin.from("idea_commits").update({
         status: "completed",
         emotional_score: penaltyScoreResult.emotionalScore,
-        semantic_diff: `Autopsy identified ${githubCorpseResult.totalCount} failed projects. 3x penalty net score: ${penaltyScoreResult.domainScore.totalScore}.`,
+        semantic_diff: `Autopsy identified ${githubCorpseResult.totalCount} failed projects. 3x penalty net score: ${penaltyScoreResult.domainScore.totalScore}. Verdict: ${tribunalFeedback.overall_verdict}`,
         target_coordinates: {
           x: 50,
           y: 50,
@@ -189,20 +198,60 @@ Return a valid JSON object with the integer score for each key:
         q4_supplementary_pains: fullValidationPayload as unknown as Json,
       }).eq("id", commitId);
 
-      // job_status を completed に更新
+      if (commitError) {
+        console.error("[Inngest save-final-results-and-checkout-head] Commit update error:", commitError);
+        throw new Error(`Failed to save commit results: ${commitError.message}`);
+      }
+
+      // ② 親IdeaのIDを取得
+      const { data: commitData, error: lookupErr } = await supabaseAdmin
+        .from("idea_commits")
+        .select("idea_id")
+        .eq("id", commitId)
+        .single();
+
+      const targetIdeaId = commitData?.idea_id || (event.data as any).ideaId;
+
+      // ③ 【重要・フェイルセーフ】検証が正常終了した場合のみ、リポジトリの HEAD (active_commit_id) を新コミットに切り替える
+      if (targetIdeaId) {
+        try {
+          const { error: updateHeadErr } = await supabaseAdmin
+            .from("ideas")
+            .update({
+              active_commit_id: commitId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", targetIdeaId);
+
+          if (updateHeadErr) {
+            console.warn(
+              `[Inngest save-final-results-and-checkout-head] Warning updating ideas.active_commit_id:`,
+              updateHeadErr.message
+            );
+          }
+        } catch (headErr) {
+          console.warn("[Inngest] Safe HEAD checkout fallback:", headErr);
+        }
+      }
+
+      // ④ job_status を COMPLETED に更新 (ユーザー向けポーリング完了通知)
       await supabaseAdmin.from("job_status").update({
         percentage: 100,
         status: "COMPLETED",
         result_data: fullValidationPayload as unknown as Json,
+        updated_at: new Date().toISOString(),
       }).eq("id", jobId);
 
       return {
         success: true,
         commitId,
+        ideaId: targetIdeaId,
         emotionalScore: penaltyScoreResult.emotionalScore,
+        verdict: tribunalFeedback.overall_verdict,
       };
     });
 
     return { jobId, result: completionResult };
   }
 );
+
