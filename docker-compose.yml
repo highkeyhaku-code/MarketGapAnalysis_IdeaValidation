@@ -12,6 +12,7 @@ services:
       - NODE_ENV=development
       - PORT=3000
       - HOSTNAME=0.0.0.0
+      - INNGEST_BASE_URL=http://inngest:8288
       # Dockerボリュームマウント時・WSL2/Windows環境におけるHot Reload (Fast Refresh) の確実な検知
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true

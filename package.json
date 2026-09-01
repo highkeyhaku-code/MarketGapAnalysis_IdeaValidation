@@ -11,7 +11,8 @@
     "test:health": "tsx ./scripts/test-health-endpoint.mjs",
     "test:git": "tsx ./scripts/test-git-for-ideas-audit.mjs",
     "test:tribunal": "tsx ./scripts/test-phase2-tribunal-audit.mjs",
-    "test:pipeline": "tsx ./scripts/test-pipeline-robustness-audit.mjs"
+    "test:pipeline": "tsx ./scripts/test-pipeline-robustness-audit.mjs",
+    "test:e2e:inngest": "tsx ./scripts/test-inngest-e2e-commit.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
