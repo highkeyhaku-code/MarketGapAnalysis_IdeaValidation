@@ -83,6 +83,21 @@ export const IdeaInputSchema = z.object({
 });
 export type IdeaInput = z.infer<typeof IdeaInputSchema>;
 
+export const VisibilityFlagsSchema = z.object({
+  q1_target_pain: z.boolean().default(true),
+  q2_solution: z.boolean().default(false),
+  q3_core_edge: z.boolean().default(false),
+  q4_supplementary_pains: z.boolean().default(true),
+});
+export type VisibilityFlags = z.infer<typeof VisibilityFlagsSchema>;
+
+export const DEFAULT_VISIBILITY_FLAGS: VisibilityFlags = {
+  q1_target_pain: true,
+  q2_solution: false,
+  q3_core_edge: false,
+  q4_supplementary_pains: true,
+};
+
 // ==============================================================================
 // 4. LLM出力スキーマ
 // ==============================================================================

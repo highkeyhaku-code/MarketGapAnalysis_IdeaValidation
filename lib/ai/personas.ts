@@ -21,6 +21,7 @@ export interface IdeaContextInput {
   siScores?: Record<string, number>;
   autopsyResults?: {
     totalCount?: number;
+    items?: any[];
     projects?: AutopsyProjectItem[];
   };
 }
@@ -45,14 +46,28 @@ export interface PersonaDisplayData extends PersonaCritique {
 export async function generateThreeSkepticalPersonasFeedback(
   idea: IdeaContextInput
 ): Promise<TribunalFeedback> {
-  const autopsyText =
-    idea.autopsyResults?.projects && idea.autopsyResults.projects.length > 0
+  const autopsyRawList =
+    idea.autopsyResults?.items && idea.autopsyResults.items.length > 0
+      ? idea.autopsyResults.items
+      : idea.autopsyResults?.projects && idea.autopsyResults.projects.length > 0
       ? idea.autopsyResults.projects
+      : [];
+
+  const autopsyText =
+    autopsyRawList.length > 0
+      ? autopsyRawList
           .slice(0, 4)
-          .map(
-            (p) =>
-              `- Repo: ${p.name} (Stars: ${p.stars}) | Cause of Death: ${p.causeOfDeath || "Development halted, monetization failure"} | URL: ${p.url}`
-          )
+          .map((p: any) => {
+            const name = p.name || p.full_name || p.repo_name || "Unknown Repo";
+            const stars = p.stars ?? p.stargazers_count ?? 0;
+            const cause =
+              p.death_cause ||
+              p.causeOfDeath ||
+              p.autopsy_reason ||
+              "Development halted, monetization failure";
+            const url = p.url || p.html_url || "https://github.com";
+            return `- Repo: ${name} (Stars: ${stars}) | Cause of Death: ${cause} | URL: ${url}`;
+          })
           .join("\n")
       : "No previous open source corpses directly detected, but intense legacy incumbent inertia observed.";
 

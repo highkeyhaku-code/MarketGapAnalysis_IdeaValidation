@@ -16,8 +16,14 @@ import {
   Loader2,
   Zap,
   Layers,
+  Lock,
 } from "lucide-react";
 import { GravityMapVisualizer, GravityMapData } from "../../../components/GravityMapVisualizer";
+import { AuthWallModal } from "../../../components/AuthWallModal";
+import { PricingModal } from "../../../components/PricingModal";
+import { useBillingStore } from "../../../lib/store/useBillingStore";
+import { useUserSession } from "../../../hooks/useUserSession";
+import { computeMarketTags, MarketTagBadge } from "../../../lib/marketTags";
 
 /**
  * 1. 専用マップ画面 (Dedicated Immersive Map Page)
@@ -39,15 +45,77 @@ export default function DedicatedMarketMapPage() {
   const [genreMetadata, setGenreMetadata] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // プログレッシブサインアップ & ハイブリッド課金
+  const { user, isGuest, showAuthWall, openAuthWall, closeAuthWall } = useUserSession();
+  const { planTier, totalCredits, openPricingModal, fetchCredits } = useBillingStore();
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+
+  // アンロック状態の判定
+  useEffect(() => {
+    async function checkUnlockStatus() {
+      if (planTier === "founder") {
+        setIsUnlocked(true);
+        return;
+      }
+      try {
+        const url = user?.id
+          ? `/api/market/unlocked?genreId=${encodeURIComponent(genreId)}&userId=${encodeURIComponent(user.id)}`
+          : `/api/market/unlocked?genreId=${encodeURIComponent(genreId)}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.success && json.isUnlocked) {
+          setIsUnlocked(true);
+        }
+      } catch (err) {
+        console.warn("Error checking market unlock status:", err);
+      }
+    }
+    if (genreId) {
+      checkUnlockStatus();
+    }
+  }, [genreId, user?.id, planTier]);
+
+  // 3クレジットでのアンロック実行
+  const handleUnlockMarket = async () => {
+    if (isGuest) {
+      openAuthWall();
+      return;
+    }
+    try {
+      setUnlocking(true);
+      const res = await fetch("/api/market/unlocked", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ genreId, userId: user.id }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setIsUnlocked(true);
+        fetchCredits(user.id);
+      } else {
+        alert(json.error || "アンロックに失敗しました（クレジット残高を確認してください）");
+      }
+    } catch (err: any) {
+      alert("通信エラー: " + err.message);
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
   const fetchMap = async () => {
     try {
       setLoading(true);
       setErrorMessage(null);
-      const res = await fetch(`/api/market/map/${genreId}`);
+      const url = user?.id
+        ? `/api/market/map/${genreId}?userId=${encodeURIComponent(user.id)}`
+        : `/api/market/map/${genreId}`;
+      const res = await fetch(url);
       const json = await res.json();
 
       if (json.success && json.mapData) {
         setMapData(json.mapData);
+        setIsUnlocked(json.isUnlocked ?? !json.isLocked);
         setGenreMetadata({
           status: json.mapData.status || "active",
           description: json.mapData.description,
@@ -68,7 +136,7 @@ export default function DedicatedMarketMapPage() {
     if (genreId) {
       fetchMap();
     }
-  }, [genreId]);
+  }, [genreId, user?.id]);
 
   // 手動キャッシュパージ & 再解析 (2クレジット消費)
   const handleRevalidate = async () => {
@@ -174,19 +242,32 @@ export default function DedicatedMarketMapPage() {
                 <Compass className="w-4 h-4" />
               </div>
               <div>
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h1 className="font-extrabold text-sm text-slate-100 tracking-tight">
                     {mapData.genreName}
                   </h1>
-                  {isStagnant ? (
-                    <span className="px-2 py-0.5 text-[9px] font-mono font-bold bg-rose-500/10 text-rose-300 border border-rose-500/30 rounded-md">
-                      ☠️ 巨人の墓場 (STAGNANT)
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 rounded-md">
-                      ACTIVE MARKET
-                    </span>
-                  )}
+
+                  {/* 🏷️ 決定論的 5種市場状況タグ (深刻度順) */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(mapData.marketTags && mapData.marketTags.length > 0
+                      ? mapData.marketTags
+                      : computeMarketTags(mapData, mapData.status)
+                    ).map((tag: any) => (
+                      <span
+                        key={tag.id}
+                        title={tag.description}
+                        className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded-md border flex items-center space-x-1 ${tag.colorClass.badgeBg}`}
+                      >
+                        <span>{tag.label}</span>
+                      </span>
+                    ))}
+                    {(!mapData.marketTags || mapData.marketTags.length === 0) &&
+                      computeMarketTags(mapData, mapData.status).length === 0 && (
+                        <span className="px-2 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 rounded-md">
+                          🌐 標準均衡市場 (ACTIVE)
+                        </span>
+                      )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -204,7 +285,7 @@ export default function DedicatedMarketMapPage() {
               ) : (
                 <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
               )}
-              <span>再分析 (2 pts)</span>
+              <span>再分析 (3 pts)</span>
             </button>
 
             <Link
@@ -230,15 +311,71 @@ export default function DedicatedMarketMapPage() {
           </span>
         </div>
 
-        {/* D3 重力マップ可視化コンポーネント (全画面没入) */}
-        <div className="flex-1 w-full min-h-[640px]">
-          <GravityMapVisualizer
-            data={mapData}
-            width={1200}
-            height={680}
-          />
+        {/* D3 重力マップ可視化コンポーネント (全画面没入 + Fog of War) */}
+        <div className="relative flex-1 w-full min-h-[640px] rounded-3xl overflow-hidden border border-slate-800 bg-slate-950">
+          {/* Fog of War (情報の非対称性) オーバーレイマスク */}
+          {!isUnlocked && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center p-6 bg-slate-950/75 backdrop-blur-md">
+              <div className="max-w-md w-full bg-slate-900/95 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-amber-400 shadow-inner">
+                  <Lock className="w-7 h-7" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
+                    Fog of War (情報の非対称性)
+                  </div>
+                  <h3 className="text-xl font-black text-slate-100">
+                    未知の市場領域（アンロックが必要）
+                  </h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    この市場の引力トポロジー・各社の摩擦スコア（Friction）・クレーター深層成分は保護されています。3クレジットを消費してアンロックすると、解約後も永久に再課金なしで閲覧できます。
+                  </p>
+                </div>
+                <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+                  <button
+                    disabled={unlocking}
+                    onClick={handleUnlockMarket}
+                    className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
+                  >
+                    {unlocking ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                    ) : (
+                      <Zap className="w-4 h-4 fill-slate-950" />
+                    )}
+                    <span>3クレジットでアンロック</span>
+                  </button>
+                  <button
+                    onClick={openPricingModal}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
+                  >
+                    Founderプランで全開放
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* D3 重力マップ可視化 (未アンロック時はボカシ + クリック不可) */}
+          <div className={!isUnlocked ? "filter blur-[6px] opacity-40 pointer-events-none select-none transition-all duration-300" : "transition-all duration-300"}>
+            <GravityMapVisualizer
+              data={mapData}
+              width={1200}
+              height={680}
+            />
+          </div>
         </div>
       </main>
+
+      {/* プラン選択 & 追加クレジット購入モーダル */}
+      <PricingModal />
+
+      {/* 認証ウォールモーダル */}
+      <AuthWallModal
+        isOpen={showAuthWall}
+        onClose={closeAuthWall}
+        title="アカウント連携で市場データをアンロックする"
+        description="市場のアンロック履歴を安全に保護し、解約後も永続的にアクセスできるようにするにはログインが必要です。"
+      />
     </div>
   );
 }

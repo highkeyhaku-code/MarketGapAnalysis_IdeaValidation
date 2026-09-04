@@ -14,17 +14,28 @@ export const supabase = createClient<Database>(
 /**
  * サーバーサイド運用用 Supabase Service Role クライアント
  * RLSをバイパスしてジョブステータス更新やキャッシュ保存を行う。
+ * ※ ブラウザ環境から直接アクセスすることはセキュリティ上禁止
  */
-export const supabaseAdmin = createClient<Database>(
-  env.NEXT_PUBLIC_SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+export const supabaseAdmin = (() => {
+  if (typeof window !== "undefined") {
+    return new Proxy({} as ReturnType<typeof createClient<Database>>, {
+      get() {
+        throw new Error("❌ supabaseAdmin cannot be accessed in browser context!");
+      },
+    });
   }
-);
+
+  return createClient<Database>(
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY || "",
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+})();
 
 let cachedUserId: string | null = null;
 

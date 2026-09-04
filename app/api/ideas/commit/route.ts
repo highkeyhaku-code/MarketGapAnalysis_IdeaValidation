@@ -12,7 +12,20 @@ import { Json } from "../../../../types/database";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { ideaInput, parentCommitId, ideaId: providedIdeaId, domain, userId: providedUserId } = body;
+    const {
+      ideaInput,
+      parentCommitId,
+      ideaId: providedIdeaId,
+      domain,
+      userId: providedUserId,
+      keywords,
+      targetDomainKeywords,
+    } = body;
+    const eventKeywords = Array.isArray(keywords)
+      ? keywords
+      : Array.isArray(targetDomainKeywords)
+      ? targetDomainKeywords
+      : undefined;
 
     // 1. Zod スキーマによる入力検証
     const validatedInput = IdeaInputSchema.parse(ideaInput);
@@ -20,7 +33,7 @@ export async function POST(req: NextRequest) {
     const userId = await getDefaultOrAuthUserId(providedUserId);
     let ideaId = providedIdeaId;
 
-    // 2. ピボット時の ideaId 解決 (親コミットから親の idea_id を自動取得)
+    // 2. ピボット時の ideaId 解決 (親コミットから親の idea_id を厳格に取得)
     if (parentCommitId) {
       const { data: parentCommit, error: parentErr } = await supabaseAdmin
         .from("idea_commits")
@@ -29,13 +42,16 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (parentErr || !parentCommit) {
-        console.warn(`[API /api/ideas/commit] Parent commit ${parentCommitId} lookup failed:`, parentErr);
-      } else {
-        ideaId = parentCommit.idea_id;
+        console.error(`[API /api/ideas/commit] Parent commit ${parentCommitId} not found:`, parentErr);
+        return NextResponse.json(
+          { success: false, error: `Parent commit "${parentCommitId}" was not found.` },
+          { status: 404 }
+        );
       }
+      ideaId = parentCommit.idea_id;
     }
 
-    // 3. 親コミットも既存 ideaId もない完全新規時のみ ideas 親レコードを作成
+    // 3. 親コミットも既存 ideaId も指定されていない完全新規作成時のみ ideas 親レコードを作成
     if (!ideaId) {
       const { data: newIdea, error: ideaErr } = await supabaseAdmin
         .from("ideas")
@@ -57,8 +73,20 @@ export async function POST(req: NextRequest) {
     const commitId = crypto.randomUUID();
     const jobId = crypto.randomUUID();
 
-    // 4. idea_commits にイミュータブルな新規コミットを INSERT
-    const { error: commitErr } = await supabaseAdmin.from("idea_commits").insert({
+    // 4.2 非公開設定フラグ (Secure by Default)
+    const visibilityFlags = {
+      q1_target_pain: body.visibilityFlags?.q1_target_pain ?? true,
+      q2_solution: body.visibilityFlags?.q2_solution ?? false,
+      q3_core_edge: body.visibilityFlags?.q3_core_edge ?? false,
+      q4_supplementary_pains: body.visibilityFlags?.q4_supplementary_pains ?? true,
+    };
+
+    // 4. idea_commits にイミュータブルな新規コミットを INSERT (状態: analyzing)
+    const basePains = Array.isArray(validatedInput.q4_supplementary_pains)
+      ? validatedInput.q4_supplementary_pains
+      : [];
+
+    const commitInsertPayload: any = {
       id: commitId,
       idea_id: ideaId,
       parent_commit_id: parentCommitId || null,
@@ -67,45 +95,51 @@ export async function POST(req: NextRequest) {
       q3_core_edge: validatedInput.q3_core_edge,
       q4_target_literacy: validatedInput.q4_target_literacy,
       q4_monetization_model: validatedInput.q4_monetization_model,
-      q4_supplementary_pains: (validatedInput.q4_supplementary_pains || []) as unknown as Json,
+      q4_supplementary_pains: {
+        rawPains: basePains,
+        visibility_flags: visibilityFlags,
+        is_public: false, // Secure by Default: 作成時は非公開
+      } as unknown as Json,
       status: "analyzing",
       emotional_score: null,
       semantic_diff: parentCommitId
         ? `Branched from parent commit ${parentCommitId.slice(0, 8)}`
         : "Initial hypothesis commit",
       target_coordinates: null,
-    });
+    };
+
+    // visibility_flags カラムへの書き込みを試行 (デュアルストレージ)
+    try {
+      commitInsertPayload.visibility_flags = visibilityFlags;
+    } catch (_e) {}
+
+    let { error: commitErr } = await supabaseAdmin.from("idea_commits").insert(commitInsertPayload);
+
+    if (commitErr && commitErr.message?.includes("visibility_flags")) {
+      // visibility_flags カラムが存在しない古いスキーマへのフォールバック
+      delete commitInsertPayload.visibility_flags;
+      const retryRes = await supabaseAdmin.from("idea_commits").insert(commitInsertPayload);
+      commitErr = retryRes.error;
+    }
 
     if (commitErr) {
       console.error("[API /api/ideas/commit] Error inserting idea_commit:", commitErr);
       throw new Error(`Failed to insert idea_commit: ${commitErr.message}`);
     }
 
-    // 5. ideas テーブルの active_commit_id (HEAD) を最新コミットIDに更新 (フェイルソフト)
+    // 【重要: HEAD保護】
+    // active_commit_id はここでは更新しない。Inngestジョブが正常完了した場合のみ
+    // runHypothesisCrashJob の save-final-results-and-checkout-head ステップで更新する。
+    // updated_at のみ更新して更新日時を記録。
     try {
-      const { error: updateHeadErr } = await supabaseAdmin
+      await supabaseAdmin
         .from("ideas")
         .update({
-          active_commit_id: commitId,
           updated_at: new Date().toISOString(),
         })
         .eq("id", ideaId);
-
-      if (updateHeadErr) {
-        console.warn(
-          `[API /api/ideas/commit] Notice: active_commit_id update not applied (column may not exist yet in DB):`,
-          updateHeadErr.message
-        );
-        // カラムが存在しない場合は updated_at のみ更新
-        await supabaseAdmin
-          .from("ideas")
-          .update({
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", ideaId);
-      }
     } catch (_err) {
-      // 外部キーまたはスキーマ不一致時の安全な早期パス
+      // ログのみ
     }
 
     // 4. 初期 job_status を作成
@@ -135,6 +169,8 @@ export async function POST(req: NextRequest) {
           targetPain: validatedInput.q1_target_pain,
           solution: validatedInput.q2_solution,
           coreEdge: validatedInput.q3_core_edge,
+          keywords: eventKeywords,
+          visibilityFlags,
         },
       });
     } catch (inngestErr) {

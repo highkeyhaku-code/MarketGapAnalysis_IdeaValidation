@@ -33,7 +33,7 @@ export const runHypothesisCrashJob = inngest.createFunction(
     retries: 3,
   },
   async ({ event, step }) => {
-    const { jobId, commitId, userId, domain, coreEdge, solution, targetPain } =
+    const { jobId, commitId, userId, domain, coreEdge, solution, targetPain, keywords } =
       event.data as HypothesisCrashEventData;
 
     try {
@@ -42,7 +42,7 @@ export const runHypothesisCrashJob = inngest.createFunction(
         await supabaseAdmin.from("job_status").upsert({
           id: jobId,
           user_id: userId,
-          status: "倒すべき最大の標的のスペックを解析中...",
+          status: "🔎 倒すべき最大の標的のスペックを解析中...",
           percentage: 15,
           error_message: null,
           updated_at: new Date().toISOString(),
@@ -77,7 +77,11 @@ export const runHypothesisCrashJob = inngest.createFunction(
           updated_at: new Date().toISOString(),
         }).eq("id", jobId);
 
-        const searchResult = await searchArchivedGithubProjects(solution || coreEdge, 6);
+        const searchKeywords = (keywords && keywords.length > 0) ? keywords : (solution || coreEdge);
+        const searchResult = await searchArchivedGithubProjects(searchKeywords, 6, {
+          solution,
+          coreEdge,
+        });
         return searchResult;
       });
 
@@ -85,7 +89,7 @@ export const runHypothesisCrashJob = inngest.createFunction(
       const penaltyScoreResult = await step.run("calculate-3x-penalty-scores", async () => {
         await supabaseAdmin.from("job_status").update({
           percentage: 65,
-          status: "⚡ 3xペナルティスコアと感情負荷を精密計算中...",
+          status: "⚖️ 損失回避バイアスに基づいた勝率を計算中...",
           updated_at: new Date().toISOString(),
         }).eq("id", jobId);
 
@@ -170,7 +174,17 @@ Return a valid JSON object with the integer score for each key:
           q3_core_edge: coreEdge,
           domain,
           totalScore: penaltyScoreResult.emotionalScore,
-          autopsyResults: githubCorpseResult,
+          autopsyResults: {
+            totalCount: githubCorpseResult.totalCount,
+            items: githubCorpseResult.items,
+            projects: (githubCorpseResult.items || []).map((item) => ({
+              name: item.name || item.full_name,
+              url: item.html_url,
+              stars: item.stargazers_count,
+              description: item.description || "",
+              causeOfDeath: item.death_cause || item.autopsy_reason || item.causeOfDeath,
+            })),
+          },
         });
 
         return feedback;
@@ -180,6 +194,30 @@ Return a valid JSON object with the integer score for each key:
       const completionResult = await step.run("save-final-results-and-checkout-head", async () => {
         const formattedPersonas = formatTribunalFeedbackForUI(tribunalFeedback);
 
+        // 既存のコミットから visibility_flags と is_public を取得して維持
+        let existingVisibility: any = null;
+        let existingIsPublic = false;
+        try {
+          const { data: existingCommit } = await supabaseAdmin
+            .from("idea_commits")
+            .select("q4_supplementary_pains, visibility_flags")
+            .eq("id", commitId)
+            .single();
+
+          if (existingCommit) {
+            existingVisibility = existingCommit.visibility_flags || (existingCommit.q4_supplementary_pains as any)?.visibility_flags;
+            existingIsPublic = (existingCommit.q4_supplementary_pains as any)?.is_public ?? false;
+          }
+        } catch (_fetchErr) {}
+
+        const eventVisibility = (event.data as any).visibilityFlags;
+        const finalVisibility = eventVisibility || existingVisibility || {
+          q1_target_pain: true,
+          q2_solution: false,
+          q3_core_edge: false,
+          q4_supplementary_pains: true,
+        };
+
         const fullValidationPayload = {
           competitorProfile,
           githubAutopsy: githubCorpseResult,
@@ -187,6 +225,8 @@ Return a valid JSON object with the integer score for each key:
           tribunal: tribunalFeedback, // TribunalFeedbackSchema 準拠のバイリンガル審査結果
           critique: tribunalFeedback, // 互換性エイリアス
           personas: formattedPersonas, // UI表示用配列
+          visibility_flags: finalVisibility,
+          is_public: existingIsPublic,
           validatedAt: new Date().toISOString(),
         };
 

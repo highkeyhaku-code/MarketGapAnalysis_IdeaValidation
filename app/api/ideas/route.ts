@@ -5,15 +5,23 @@ import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../lib/supabaseClie
  * アイデア & コミット一覧取得 API
  * GET /api/ideas
  */
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    // 1. まず active_commit_id を含むクエリを試行
-    let ideasData: any[] | null = null;
+    const { searchParams } = new URL(req.url);
+    const requestedUserId = searchParams.get("userId");
 
-    const tryWithActiveCommit = await supabaseAdmin
+    // 1. まず active_commit_id を含むクエリを試行
+    let query = supabaseAdmin
       .from("ideas")
       .select("id, title, active_commit_id, created_at, updated_at, user_id, idea_commits(*)")
       .order("created_at", { ascending: false });
+
+    if (requestedUserId) {
+      query = query.eq("user_id", requestedUserId);
+    }
+
+    let ideasData: any[] | null = null;
+    const tryWithActiveCommit = await query;
 
     if (tryWithActiveCommit.error) {
       // active_commit_id カラムが存在しない古いスキーマ環境へのフェイルソフト
@@ -21,16 +29,21 @@ export async function GET(_req: NextRequest) {
         "[API /api/ideas GET] Query with active_commit_id failed, falling back to base schema:",
         tryWithActiveCommit.error.message
       );
-      const fallbackQuery = await supabaseAdmin
+      let fallbackQuery = supabaseAdmin
         .from("ideas")
         .select("id, title, created_at, updated_at, user_id, idea_commits(*)")
         .order("created_at", { ascending: false });
 
-      if (fallbackQuery.error) {
-        console.error("[API /api/ideas GET] Fallback query failed:", fallbackQuery.error);
-        return NextResponse.json({ success: false, error: fallbackQuery.error.message }, { status: 500 });
+      if (requestedUserId) {
+        fallbackQuery = fallbackQuery.eq("user_id", requestedUserId);
       }
-      ideasData = fallbackQuery.data;
+
+      const resFallback = await fallbackQuery;
+      if (resFallback.error) {
+        console.error("[API /api/ideas GET] Fallback query failed:", resFallback.error);
+        return NextResponse.json({ success: false, error: resFallback.error.message }, { status: 500 });
+      }
+      ideasData = resFallback.data;
     } else {
       ideasData = tryWithActiveCommit.data;
     }

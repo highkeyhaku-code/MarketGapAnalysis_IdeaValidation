@@ -62,6 +62,8 @@ export interface GravityMapData {
   customPlanet?: CustomPlanetData | null;
   status?: string;
   description?: string;
+  isLocked?: boolean;
+  marketTags?: any[];
 }
 
 export interface GravityMapVisualizerProps {
@@ -1264,8 +1266,14 @@ export function GravityMapVisualizer({
                   <BarChart3 className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div className="text-base font-bold font-mono text-indigo-400">
-                  {selectedCompany.pullScore}
-                  <span className="text-[10px] text-slate-500 font-normal">/100</span>
+                  {selectedCompany.pullScore !== null && selectedCompany.pullScore !== undefined ? (
+                    <>
+                      {selectedCompany.pullScore}
+                      <span className="text-[10px] text-slate-500 font-normal">/100</span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-amber-400">🔒 ロック</span>
+                  )}
                 </div>
               </div>
 
@@ -1275,8 +1283,14 @@ export function GravityMapVisualizer({
                   <Flame className="w-3 h-3 text-rose-400" />
                 </div>
                 <div className="text-base font-bold font-mono text-rose-400">
-                  {selectedCompany.frictionScore}
-                  <span className="text-[10px] text-slate-500 font-normal">/100</span>
+                  {selectedCompany.frictionScore !== null && selectedCompany.frictionScore !== undefined ? (
+                    <>
+                      {selectedCompany.frictionScore}
+                      <span className="text-[10px] text-slate-500 font-normal">/100</span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-amber-400">🔒 ロック</span>
+                  )}
                 </div>
               </div>
 

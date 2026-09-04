@@ -18,6 +18,8 @@ export interface HypothesisCrashEventData {
   targetPain: string;
   solution: string;
   coreEdge: string;
+  keywords?: string[];
+  visibilityFlags?: Record<string, boolean>;
 }
 
 /**

@@ -24,10 +24,16 @@ import {
   FileText,
   Trash2,
   Layers,
+  ShieldCheck,
 } from "lucide-react";
 import { IdeaWizard } from "./IdeaWizard";
 import { IdeaInput, PhysicalElement } from "../schemas/zod";
 import { computeCommitTreeVersions } from "../lib/versioning";
+import { AuthWallModal } from "./AuthWallModal";
+import { GuestMigrationModal } from "./GuestMigrationModal";
+import { PricingModal } from "./PricingModal";
+import { useUserSession } from "../hooks/useUserSession";
+import { upsertDraftToGuestSession } from "../lib/guestSession";
 
 export type KanbanColumnId = "DRAFT" | "DISCOVERED" | "VALIDATING" | "VALIDATED" | "ARCHIVED";
 
@@ -98,17 +104,56 @@ export function TheGarageKanban() {
   const [editingCardForWizard, setEditingCardForWizard] = useState<KanbanCardItem | null>(null);
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
 
+  // プログレッシブサインアップ & セッション管理
+  const {
+    user,
+    isGuest,
+    guestSession,
+    showAuthWall,
+    showMigrationModal,
+    openAuthWall,
+    closeAuthWall,
+    handleMigrationCompleted,
+    handleMigrationDiscarded,
+  } = useUserSession();
+
   const showToast = (text: string, type: "info" | "success" | "warning" = "info") => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // 1. 本番 DB からのアイデア・コミット一覧フェッチ (HEAD active_commit_id 参照)
+  // 1. アイデア・コミット一覧フェッチ (未ログイン時はローカルゲストセッションのみ、ログイン時は自ユーザーのDBデータ)
   useEffect(() => {
     const fetchIdeasFromDb = async () => {
       try {
         setLoading(true);
-        const res = await fetch("/api/ideas");
+
+        // 未ログイン (ゲスト) の場合: サーバーのDBはフェッチせず、LocalStorageのゲストドラフトのみを表示
+        if (isGuest) {
+          const guestDrafts = guestSession?.draftIdeas || [];
+          const localCards: KanbanCardItem[] = guestDrafts.map((draft: any) => ({
+            id: draft.id,
+            commitId: draft.id,
+            ideaId: draft.id,
+            title: draft.title || "ドラフト仮説",
+            targetPain: draft.ideaInput.q1_target_pain,
+            solution: draft.ideaInput.q2_solution,
+            coreEdge: draft.ideaInput.q3_core_edge,
+            score: null,
+            version: "v1 (Local Draft)",
+            totalCommitsCount: 1,
+            badgeText: "v1 (Local 48h TTL)",
+            columnId: "DRAFT",
+            createdAt: draft.createdAt,
+          }));
+
+          setCards(localCards);
+          return;
+        }
+
+        // ログイン済みの場合: 自ユーザーIDで絞り込んでフェッチ
+        const url = user?.id ? `/api/ideas?userId=${encodeURIComponent(user.id)}` : "/api/ideas";
+        const res = await fetch(url);
         const json = await res.json();
         if (json.success && Array.isArray(json.ideas)) {
           const loadedCards: KanbanCardItem[] = [];
@@ -148,19 +193,20 @@ export function TheGarageKanban() {
             }
 
             loadedCards.push({
-              id: headCommit.id,
+              id: idea.id,
               commitId: headCommit.id,
               ideaId: idea.id,
-              title: idea.title || headCommit.q1_target_pain?.slice(0, 40) || "Untitled Idea",
-              targetPain: headCommit.q1_target_pain || "",
-              solution: headCommit.q2_solution || "",
-              coreEdge: headCommit.q3_core_edge || "",
+              title: idea.title,
+              targetPain: headCommit.q1_target_pain || "ペイン未設定",
+              solution: headCommit.q2_solution || "ソリューション未設定",
+              coreEdge: headCommit.q3_core_edge || "優位性未設定",
               score: headCommit.emotional_score,
               version: headVersion,
               totalCommitsCount: commits.length,
               badgeText,
               columnId,
-              createdAt: headCommit.created_at ? new Date(headCommit.created_at).toLocaleDateString() : "Just now",
+              createdAt: idea.created_at,
+              jobId: headCommit.job_id,
               parentCommitId: headCommit.parent_commit_id,
             });
           });
@@ -168,14 +214,15 @@ export function TheGarageKanban() {
           setCards(loadedCards);
         }
       } catch (err) {
-        console.error("Failed to load cards from database:", err);
+        console.error("Failed to fetch ideas:", err);
+        showToast("仮説データの取得に失敗しました", "warning");
       } finally {
         setLoading(false);
       }
     };
 
     fetchIdeasFromDb();
-  }, []);
+  }, [isGuest, guestSession, user?.id]);
 
   // ドラッグ＆ドロップ終了時のハンドラ
   const onDragEnd = async (result: DropResult) => {
@@ -204,6 +251,11 @@ export function TheGarageKanban() {
 
     // [ケース 2]: DISCOVERED -> VALIDATING (Inngest 検証ジョブ起動)
     if (sourceCol === "DISCOVERED" && destCol === "VALIDATING") {
+      if (isGuest) {
+        openAuthWall();
+        showToast("🔒 検証ジョブの実行にはアカウント連携が必要です", "warning");
+        return;
+      }
       showToast(`🚀 [${card.title}] の仮説クラッシュジョブを起動しました...`, "info");
       
       try {
@@ -265,6 +317,45 @@ export function TheGarageKanban() {
   const handleAddNewDraft = async () => {
     try {
       setIsCreatingDraft(true);
+
+      if (isGuest) {
+        const localId = crypto.randomUUID();
+        const newCard: KanbanCardItem = {
+          id: localId,
+          commitId: localId,
+          ideaId: localId,
+          title: "新規仮説ドラフト (ローカル)",
+          targetPain: "未定義のターゲットペイン（ウィザードで入力してください）",
+          solution: "未定義のソリューション（ウィザードで入力してください）",
+          coreEdge: "未定義のコア優位性（ウィザードで入力してください）",
+          version: "v1 (Local)",
+          totalCommitsCount: 1,
+          badgeText: "v1 (Local 48h TTL)",
+          columnId: "DRAFT",
+          createdAt: new Date().toISOString(),
+        };
+
+        upsertDraftToGuestSession({
+          id: localId,
+          title: newCard.title,
+          domain: "B2B_SME",
+          ideaInput: {
+            q1_target_pain: newCard.targetPain,
+            q2_solution: newCard.solution,
+            q3_core_edge: newCard.coreEdge,
+            q4_target_literacy: "intermediate",
+            q4_monetization_model: "subscription",
+            q4_supplementary_pains: [],
+          },
+          keywords: [],
+        });
+
+        setCards((prev) => [newCard, ...prev]);
+        setEditingCardForWizard(newCard);
+        showToast("💾 ローカルに下書きを作成しました (48時間保存)", "info");
+        return;
+      }
+
       const res = await fetch("/api/ideas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -276,7 +367,7 @@ export function TheGarageKanban() {
 
       if (json.success && json.commit && json.idea) {
         const newCard: KanbanCardItem = {
-          id: json.commit.id,
+          id: json.idea.id,
           commitId: json.commit.id,
           ideaId: json.idea.id,
           title: json.idea.title,
@@ -303,8 +394,37 @@ export function TheGarageKanban() {
     }
   };
 
+  // プロジェクト完全削除 (Hard Delete)
+  const handleDeleteIdea = async (ideaId: string, cardTitle: string) => {
+    const confirmed = window.confirm(
+      `【確認】プロジェクト「${cardTitle}」と全バージョン履歴を完全に削除してよろしいですか？\nこの操作は取り消せません。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/ideas/${ideaId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        setCards((prev) => prev.filter((c) => c.ideaId !== ideaId && c.id !== ideaId));
+        showToast(`🗑️ プロジェクト「${cardTitle}」を完全に削除しました。`, "success");
+      } else {
+        alert(`削除に失敗しました: ${json.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      alert(`ネットワークエラーにより削除できませんでした: ${err.message}`);
+    }
+  };
+
   // ウィザード完了時の反映 (即時コミット作成 & 検証画面へシームレス遷移)
-  const handleWizardComplete = async (data: IdeaInput & { detectedElements?: PhysicalElement[] }) => {
+  const handleWizardComplete = async (
+    data: IdeaInput & {
+      detectedElements?: PhysicalElement[];
+      visibilityFlags?: any;
+    }
+  ) => {
     if (!editingCardForWizard) return;
     try {
       showToast("🚀 アイデアコミットを作成し、仮説クラッシュ検証を開始します...", "info");
@@ -323,6 +443,7 @@ export function TheGarageKanban() {
           },
           ideaId: editingCardForWizard.ideaId,
           parentCommitId: editingCardForWizard.commitId || null,
+          visibilityFlags: data.visibilityFlags,
           domain: "B2B_SME",
         }),
       });
@@ -330,9 +451,9 @@ export function TheGarageKanban() {
       const json = await res.json();
       if (json.success && json.commitId) {
         setEditingCardForWizard(null);
-        showToast("⚡ 検証ジョブが正常にキックされました。結果画面へ遷移します...", "success");
-        // 検証結果・進捗画面へ即時ルーティング
-        router.push(`/validate/${json.commitId}/result`);
+        showToast("⚡ 検証ジョブが正常にキックされました。リポジトリ詳細へ遷移します...", "success");
+        // リポジトリ詳細画面へ即時ルーティング
+        router.push(`/ideas/${editingCardForWizard.ideaId}?commitId=${json.commitId}`);
       } else {
         alert(`Failed to start validation: ${json.error || "Unknown error"}`);
       }
@@ -369,6 +490,32 @@ export function TheGarageKanban() {
           <span>{isCreatingDraft ? "Creating..." : "New Hypothesis Draft"}</span>
         </button>
       </div>
+
+      {/* 未ログイン時のローカル隔離表示バッジ (データ安全性の視覚的担保) */}
+      {isGuest && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-2xl text-xs text-amber-200 gap-3">
+          <div className="flex items-center space-x-2.5">
+            <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="space-y-0.5">
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-amber-300">ローカル保存データ（ゲストセッション: 48時間限定）</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  隔離保護中
+                </span>
+              </div>
+              <p className="text-slate-400 text-[11px]">
+                お使いのブラウザ内（LocalStorage）のみに安全に保持されています。他人のデータが表示されることは一切ありません。
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={openAuthWall}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-bold text-xs rounded-xl shadow-md transition cursor-pointer shrink-0"
+          >
+            ログインしてクラウド永続化
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-20 text-center text-xs text-slate-400 font-mono flex items-center justify-center space-x-2">
@@ -423,10 +570,11 @@ export function TheGarageKanban() {
                                 ref={dragProvided.innerRef}
                                 {...dragProvided.draggableProps}
                                 {...dragProvided.dragHandleProps}
-                                className={`p-4 rounded-2xl bg-slate-900 border transition shadow-md select-none group relative ${
+                                onClick={() => router.push(`/ideas/${card.ideaId}`)}
+                                className={`p-4 rounded-2xl bg-slate-900 border transition shadow-md select-none group relative cursor-pointer ${
                                   dragSnapshot.isDragging
                                     ? "border-indigo-500 shadow-2xl scale-105 rotate-1 bg-slate-850 z-50"
-                                    : "border-slate-800 hover:border-slate-700 hover:bg-slate-850"
+                                    : "border-slate-800 hover:border-indigo-500/50 hover:bg-slate-850"
                                 }`}
                               >
                                 {/* カードヘッダー */}
@@ -454,7 +602,7 @@ export function TheGarageKanban() {
                                 </div>
 
                                 {/* タイトル & ペイン */}
-                                <h4 className="font-bold text-sm text-slate-100 line-clamp-1 mb-1">
+                                <h4 className="font-bold text-sm text-slate-100 line-clamp-1 mb-1 group-hover:text-indigo-300 transition">
                                   {card.title}
                                 </h4>
                                 <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
@@ -462,27 +610,31 @@ export function TheGarageKanban() {
                                 </p>
 
                                 {/* アクションバー */}
-                                <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                                <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400" onClick={(e) => e.stopPropagation()}>
                                   <span className="font-mono text-[10px] text-slate-500">{card.createdAt}</span>
 
                                   <div className="flex items-center space-x-1.5">
-                                    {/* 検証結果リンク */}
-                                    {card.commitId && (
-                                      <button
-                                        type="button"
-                                        onClick={() => router.push(`/validate/${card.commitId}/result`)}
-                                        className="p-1 hover:text-indigo-300 hover:bg-slate-800 rounded-md transition"
-                                        title="検証結果を開く"
-                                      >
-                                        <ExternalLink className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
+                                    {/* リポジトリ詳細・検証結果リンク */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/ideas/${card.ideaId}`);
+                                      }}
+                                      className="p-1 hover:text-indigo-300 hover:bg-slate-800 rounded-md transition"
+                                      title="アイデア詳細 (Repository View) を開く"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </button>
 
                                     {/* ピボットボタン */}
                                     {card.commitId && (
                                       <button
                                         type="button"
-                                        onClick={() => router.push(`/validate?pivotFrom=${card.commitId}`)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          router.push(`/validate?pivotFrom=${card.commitId}`);
+                                        }}
                                         className="p-1 hover:text-purple-300 hover:bg-slate-800 rounded-md transition"
                                         title="このコミットからピボット"
                                       >
@@ -493,11 +645,27 @@ export function TheGarageKanban() {
                                     {/* 編集ボタン */}
                                     <button
                                       type="button"
-                                      onClick={() => setEditingCardForWizard(card)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingCardForWizard(card);
+                                      }}
                                       className="p-1 hover:text-slate-200 hover:bg-slate-800 rounded-md transition"
                                       title="ウィザードで編集"
                                     >
                                       <FileText className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    {/* 削除ボタン */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteIdea(card.ideaId, card.title);
+                                      }}
+                                      className="p-1 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition"
+                                      title="プロジェクトを完全に削除"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
                                     </button>
                                   </div>
                                 </div>
@@ -570,6 +738,30 @@ export function TheGarageKanban() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* AUTH WALL & GUEST MIGRATION MODALS */}
+      {/* ========================================================================= */}
+      <AuthWallModal
+        isOpen={showAuthWall}
+        onClose={closeAuthWall}
+        title="アカウント連携でカンバンを永続化する"
+        description="作成したドラフト仮説を保存し、チームや投資家と共有するにはログインが必要です。"
+      />
+
+      <GuestMigrationModal
+        isOpen={showMigrationModal}
+        userEmail={user?.email}
+        onMigrated={(count) => {
+          handleMigrationCompleted(count);
+          showToast(`${count}件の仮説をアカウントに引き継ぎました！`, "success");
+          window.location.reload();
+        }}
+        onDiscarded={handleMigrationDiscarded}
+      />
+
+      {/* プラン選択 & 追加クレジット購入モーダル */}
+      <PricingModal />
     </div>
   );
 }

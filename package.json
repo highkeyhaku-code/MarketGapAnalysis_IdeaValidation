@@ -12,7 +12,9 @@
     "test:git": "tsx ./scripts/test-git-for-ideas-audit.mjs",
     "test:tribunal": "tsx ./scripts/test-phase2-tribunal-audit.mjs",
     "test:pipeline": "tsx ./scripts/test-pipeline-robustness-audit.mjs",
-    "test:e2e:inngest": "tsx ./scripts/test-inngest-e2e-commit.mjs"
+    "test:e2e:inngest": "tsx ./scripts/test-inngest-e2e-commit.mjs",
+    "test:billing": "tsx ./scripts/test-hybrid-billing-and-progressive-signup.mjs",
+    "test:e2e:prod": "tsx ./scripts/test-production-e2e-lifecycle.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
@@ -26,6 +28,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.86.0",
+    "stripe": "^22.6.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

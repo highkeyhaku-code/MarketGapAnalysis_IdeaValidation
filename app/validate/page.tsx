@@ -16,10 +16,17 @@ import {
   Lightbulb,
   ArrowRight,
   Check,
+  Zap,
 } from "lucide-react";
 import { IdeaWizard } from "../../components/IdeaWizard";
 import { JobPollingTracker } from "../../components/JobPollingTracker";
 import { DetachedHeadStickyBanner } from "../../components/DetachedHeadStickyBanner";
+import { AuthWallModal } from "../../components/AuthWallModal";
+import { GuestMigrationModal } from "../../components/GuestMigrationModal";
+import { PricingModal } from "../../components/PricingModal";
+import { useUserSession } from "../../hooks/useUserSession";
+import { useBillingStore } from "../../lib/store/useBillingStore";
+import { upsertDraftToGuestSession } from "../../lib/guestSession";
 import { useIdeaStore } from "../../lib/store/useIdeaStore";
 import { IdeaInput, PhysicalElement } from "../../schemas/zod";
 import { PivotSuggestionResponse } from "../api/ideas/pivot-suggestion/route";
@@ -41,7 +48,33 @@ function ValidateContent() {
   const [pivotCommitMeta, setPivotCommitMeta] = useState<any>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [createdCommitId, setCreatedCommitId] = useState<string | null>(null);
+  const [createdIdeaId, setCreatedIdeaId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // プログレッシブサインアップ & セッション管理
+  const {
+    user,
+    isGuest,
+    showAuthWall,
+    showMigrationModal,
+    openAuthWall,
+    closeAuthWall,
+    handleMigrationCompleted,
+    handleMigrationDiscarded,
+  } = useUserSession();
+
+  const {
+    planTier,
+    monthlyCredits,
+    purchasedCredits,
+    totalCredits,
+    openPricingModal,
+    fetchCredits,
+  } = useBillingStore();
+
+  useEffect(() => {
+    fetchCredits(user?.id);
+  }, [user?.id, fetchCredits]);
 
   // What-If カードからのクエリ復元
   useEffect(() => {
@@ -125,10 +158,38 @@ function ValidateContent() {
 
   // ウィザード送信ハンドラ
   const handleWizardSubmit = async (
-    data: IdeaInput & { detectedElements?: PhysicalElement[] }
+    data: IdeaInput & {
+      detectedElements?: PhysicalElement[];
+      visibilityFlags?: any;
+      previewSummary?: any;
+    }
   ) => {
     try {
       setIsSubmitting(true);
+
+      // ゲストセッション (LocalStorage, 48h TTL) にドラフトを退避
+      upsertDraftToGuestSession({
+        id: pivotCommitMeta?.idea_id || undefined,
+        title: data.q1_target_pain.slice(0, 40),
+        domain: "B2B_SME",
+        ideaInput: {
+          q1_target_pain: data.q1_target_pain,
+          q2_solution: data.q2_solution,
+          q3_core_edge: data.q3_core_edge,
+          q4_target_literacy: data.q4_target_literacy,
+          q4_monetization_model: data.q4_monetization_model,
+          q4_supplementary_pains: data.q4_supplementary_pains,
+        },
+        keywords: data.previewSummary?.targetDomainKeywords || [],
+      });
+
+      // 未ログインの場合、アカウント永続化のために Auth Wall を表示し、コミット送信を確実に中断
+      if (isGuest && !searchParams.get("guestContinue")) {
+        openAuthWall();
+        setIsSubmitting(false);
+        return;
+      }
+
       const res = await fetch("/api/ideas/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -142,13 +203,17 @@ function ValidateContent() {
             q4_supplementary_pains: data.q4_supplementary_pains,
           },
           parentCommitId: pivotFrom || null,
+          ideaId: pivotCommitMeta?.idea_id || null,
+          visibilityFlags: data.visibilityFlags,
           domain: "B2B_SME",
+          keywords: data.previewSummary?.targetDomainKeywords || [],
         }),
       });
 
       const json = await res.json();
       if (json.success && json.commitId && json.jobId) {
         setCreatedCommitId(json.commitId);
+        setCreatedIdeaId(json.ideaId || pivotCommitMeta?.idea_id || null);
         setActiveJobId(json.jobId);
       } else {
         alert(`Failed to commit: ${json.error || "Unknown error"}`);
@@ -160,10 +225,15 @@ function ValidateContent() {
     }
   };
 
-  // ジョブ完了時の画面遷移
+  // ジョブ完了時の画面遷移 (統合リポジトリビュー /ideas/[ideaId] へ遷移)
   const handleJobComplete = () => {
-    if (createdCommitId) {
+    const targetIdeaId = createdIdeaId || pivotCommitMeta?.idea_id;
+    if (targetIdeaId && createdCommitId) {
+      router.push(`/ideas/${targetIdeaId}?commitId=${createdCommitId}`);
+    } else if (createdCommitId) {
       router.push(`/validate/${createdCommitId}/result`);
+    } else {
+      router.push("/");
     }
   };
 
@@ -198,10 +268,32 @@ function ValidateContent() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 text-xs">
-            <span className="px-2.5 py-1 bg-purple-500/10 border border-purple-500/30 text-purple-300 rounded-lg font-mono">
-              Mode: Validation Engine
-            </span>
+          <div className="flex items-center space-x-3 text-xs">
+            {/* プランバッジ & クレジットボタン */}
+            <button
+              onClick={openPricingModal}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-purple-500/50 transition cursor-pointer"
+              title="プラン変更・クレジット追加チャージ"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <span className="font-mono font-bold text-slate-100">{totalCredits} pts</span>
+              <span className="hidden sm:inline text-[10px] text-slate-400">
+                (月:{monthlyCredits}/買:{purchasedCredits})
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] uppercase font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                {planTier}
+              </span>
+            </button>
+
+            {/* ログインボタン (未ログイン時) */}
+            {isGuest && (
+              <button
+                onClick={openAuthWall}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer"
+              >
+                ログイン
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -225,9 +317,9 @@ function ValidateContent() {
           </p>
         </div>
 
-        {/* 2.7 ソクラテス式対話バナー (Socratic Challenge: 思考の足場常駐) */}
+        {/* 2.7 ソクラテス式対話バナー (Socratic Challenge: 思考の足場常設 Sticky Header) */}
         {socraticQuestion && (
-          <div className="p-6 bg-gradient-to-br from-purple-950/80 via-slate-900/90 to-indigo-950/80 border border-purple-500/40 rounded-3xl shadow-2xl space-y-3 animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="sticky top-20 z-40 p-5 bg-slate-900/95 backdrop-blur-md border border-purple-500/50 rounded-3xl shadow-2xl space-y-2.5 animate-in fade-in slide-in-from-top-4 duration-500">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Lightbulb className="w-5 h-5 text-amber-400 shrink-0" />
@@ -235,21 +327,21 @@ function ValidateContent() {
                   <span className="text-[10px] font-mono font-bold uppercase text-purple-300 tracking-wider block">
                     🔄 戦略的ピボット進行中 {pivotTag ? `[ 💡 "${pivotTag}" ]` : ""}
                   </span>
-                  <h3 className="text-sm font-bold text-slate-100">
-                    AI共同創業者・審査員からの問いかけ (思考の足場)
+                  <h3 className="text-xs font-bold text-slate-100">
+                    AI共同創業者・審査員からの問いかけ (思考の足場 / Socratic Question)
                   </h3>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 bg-slate-950/80 border border-purple-500/20 rounded-2xl">
+            <div className="p-3.5 bg-slate-950/90 border border-purple-500/30 rounded-2xl">
               <p className="text-xs text-purple-200 italic font-medium leading-relaxed">
                 "{socraticQuestion}"
               </p>
             </div>
 
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              ※ 確証バイアスを破壊しオーナーシップを保つため、AIによる回答の自動書き換えは行われません。上記の問いを手がかりに、以下のフォーム（Q1〜Q4）の回答をご自身で再構築してください。
+            <p className="text-[10px] text-slate-400 leading-tight">
+              ※ 確証バイアスを破壊しオーナーシップを保つため、AIによる回答の自動書き換えは行われません。上記の問いを手がかりに、ご自身で回答を再構築してください。
             </p>
           </div>
         )}
@@ -310,6 +402,26 @@ function ValidateContent() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* 5. AUTH WALL & GUEST MIGRATION MODALS */}
+      {/* ========================================================================= */}
+      <AuthWallModal
+        isOpen={showAuthWall}
+        onClose={closeAuthWall}
+        title="アカウント連携で検証を永続化する"
+        description="入力した仮説データやAI審査レポートを保護し、タイムトラベル・ピボット（Git for Ideas）を利用するにはログインが必要です。"
+      />
+
+      <GuestMigrationModal
+        isOpen={showMigrationModal}
+        userEmail={user?.email}
+        onMigrated={handleMigrationCompleted}
+        onDiscarded={handleMigrationDiscarded}
+      />
+
+      {/* プラン選択 & 追加クレジット購入モーダル */}
+      <PricingModal />
     </div>
   );
 }

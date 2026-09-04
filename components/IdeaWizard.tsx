@@ -6,6 +6,8 @@ import {
   IdeaInput,
   PhysicalElement,
   PhysicalElementEnum,
+  VisibilityFlags,
+  DEFAULT_VISIBILITY_FLAGS,
 } from "../schemas/zod";
 import {
   Sparkles,
@@ -25,13 +27,20 @@ import {
   Check,
   RotateCcw,
   Edit3,
+  Eye,
+  EyeOff,
+  Lock,
 } from "lucide-react";
 import { PreviewSummary } from "../app/api/validate/preview-summary/route";
 
 export interface IdeaWizardProps {
   initialValues?: Partial<IdeaInput>;
   isRestoredFromPastCommit?: boolean;
-  onSubmit: (data: IdeaInput & { detectedElements?: PhysicalElement[]; previewSummary?: PreviewSummary | null }) => void;
+  onSubmit: (data: IdeaInput & {
+    detectedElements?: PhysicalElement[];
+    previewSummary?: PreviewSummary | null;
+    visibilityFlags?: VisibilityFlags;
+  }) => void;
   isSubmitting?: boolean;
 }
 
@@ -149,6 +158,16 @@ export function IdeaWizard({
     }
   };
 
+  // 4.2 非公開設定トグル (Secure by Default)
+  const [visibilityFlags, setVisibilityFlags] = useState<VisibilityFlags>(DEFAULT_VISIBILITY_FLAGS);
+
+  const toggleVisibility = (field: keyof VisibilityFlags) => {
+    setVisibilityFlags((prev) => ({
+      ...prev,
+      [field]: !prev[field],
+    }));
+  };
+
   const handleNextStep = async () => {
     if (currentStep === 3) {
       await triggerQ3Classification();
@@ -173,6 +192,7 @@ export function IdeaWizard({
       q4_supplementary_pains: combinedSupplementary,
       detectedElements,
       previewSummary,
+      visibilityFlags,
     });
   };
 
@@ -262,9 +282,24 @@ export function IdeaWizard({
         {currentStep === 1 && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="space-y-1">
-              <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
-                Step 1 / 5: ターゲットと課題
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
+                  Step 1 / 5: ターゲットと課題
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility("q1_target_pain")}
+                  className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                    visibilityFlags.q1_target_pain
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                  }`}
+                  title="共有ビューでの公開/非公開を切り替え"
+                >
+                  {visibilityFlags.q1_target_pain ? <Eye className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  <span>{visibilityFlags.q1_target_pain ? "👁️ 投資家に公開中" : "🔒 非公開 (NDA保護)"}</span>
+                </button>
+              </div>
               <h2 className="text-xl font-bold text-slate-100">
                 Q1: ターゲットと解決したい深い痛み (Target & Pain)
               </h2>
@@ -342,9 +377,24 @@ export function IdeaWizard({
         {currentStep === 2 && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="space-y-1">
-              <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
-                Step 2 / 5: 解決策
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
+                  Step 2 / 5: 解決策
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility("q2_solution")}
+                  className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                    visibilityFlags.q2_solution
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                  }`}
+                  title="共有ビューでの公開/非公開を切り替え"
+                >
+                  {visibilityFlags.q2_solution ? <Eye className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  <span>{visibilityFlags.q2_solution ? "👁️ 投資家に公開中" : "🔒 非公開 (NDA保護)"}</span>
+                </button>
+              </div>
               <h2 className="text-xl font-bold text-slate-100">
                 Q2: 提供するソリューション (Solution)
               </h2>
@@ -422,9 +472,24 @@ export function IdeaWizard({
         {currentStep === 3 && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="space-y-1">
-              <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
-                Step 3 / 5: 構造的エッジ
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
+                  Step 3 / 5: 構造的エッジ
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility("q3_core_edge")}
+                  className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                    visibilityFlags.q3_core_edge
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                  }`}
+                  title="共有ビューでの公開/非公開を切り替え"
+                >
+                  {visibilityFlags.q3_core_edge ? <Eye className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  <span>{visibilityFlags.q3_core_edge ? "👁️ 投資家に公開中" : "🔒 非公開 (NDA保護)"}</span>
+                </button>
+              </div>
               <h2 className="text-xl font-bold text-slate-100">
                 Q3: 競合に対するコアな優位性・構造的堀 (Core Edge)
               </h2>
@@ -486,9 +551,24 @@ export function IdeaWizard({
         {currentStep === 4 && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="space-y-1">
-              <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
-                Step 4 / 5: ビジネス属性 & Smart Defaults
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">
+                  Step 4 / 5: ビジネス属性 & Smart Defaults
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility("q4_supplementary_pains")}
+                  className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold transition border cursor-pointer ${
+                    visibilityFlags.q4_supplementary_pains
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                  }`}
+                  title="共有ビューでの公開/非公開を切り替え"
+                >
+                  {visibilityFlags.q4_supplementary_pains ? <Eye className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  <span>{visibilityFlags.q4_supplementary_pains ? "👁️ 投資家に公開中" : "🔒 非公開 (NDA保護)"}</span>
+                </button>
+              </div>
               <h2 className="text-xl font-bold text-slate-100">
                 Q4: ビジネス属性 & Smart Defaults 救済設定
               </h2>
@@ -712,6 +792,43 @@ export function IdeaWizard({
                   <p className="text-xs text-slate-400 italic">
                     {previewSummary.nemesisReason}
                   </p>
+                </div>
+
+                {/* 4. 投資家向け共有ビューの公開/非公開設定確認 (Secure by Default) */}
+                <div className="p-5 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold font-mono text-slate-300">
+                    <div className="flex items-center space-x-2">
+                      <Lock className="w-4 h-4 text-purple-400" />
+                      <span>4. 投資家向け共有ビューの公開設定 (Secure by Default)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500">※ 非公開項目はサーバー側で強制マスクされます</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs font-mono">
+                    <div className="p-2.5 rounded-xl border bg-slate-900/60 border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">Q1 課題:</span>
+                      <span className={visibilityFlags.q1_target_pain ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {visibilityFlags.q1_target_pain ? "👁️ 公開" : "🔒 非公開"}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl border bg-slate-900/60 border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">Q2 解決策:</span>
+                      <span className={visibilityFlags.q2_solution ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {visibilityFlags.q2_solution ? "👁️ 公開" : "🔒 非公開"}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl border bg-slate-900/60 border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">Q3 エッジ:</span>
+                      <span className={visibilityFlags.q3_core_edge ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {visibilityFlags.q3_core_edge ? "👁️ 公開" : "🔒 非公開"}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl border bg-slate-900/60 border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">Q4 ビジネス:</span>
+                      <span className={visibilityFlags.q4_supplementary_pains ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {visibilityFlags.q4_supplementary_pains ? "👁️ 公開" : "🔒 非公開"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : null}

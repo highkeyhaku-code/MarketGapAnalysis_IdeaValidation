@@ -263,6 +263,8 @@ export type Database = {
           user_id: string;
           title: string;
           active_commit_id: string | null;
+          is_public: boolean | null;
+          share_token: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -271,6 +273,8 @@ export type Database = {
           user_id: string;
           title: string;
           active_commit_id?: string | null;
+          is_public?: boolean | null;
+          share_token?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -279,6 +283,8 @@ export type Database = {
           user_id?: string;
           title?: string;
           active_commit_id?: string | null;
+          is_public?: boolean | null;
+          share_token?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -308,6 +314,7 @@ export type Database = {
           semantic_diff: string | null;
           target_coordinates: Json | null;
           share_token: string;
+          visibility_flags: Json | null;
           created_at: string;
         };
         Insert: {
@@ -325,6 +332,7 @@ export type Database = {
           semantic_diff?: string | null;
           target_coordinates?: Json | null;
           share_token?: string;
+          visibility_flags?: Json | null;
           created_at?: string;
         };
         Update: {
@@ -342,6 +350,7 @@ export type Database = {
           semantic_diff?: string | null;
           target_coordinates?: Json | null;
           share_token?: string;
+          visibility_flags?: Json | null;
           created_at?: string;
         };
         Relationships: [
@@ -393,6 +402,65 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      profiles: {
+        Row: {
+          id: string;
+          stripe_customer_id: string | null;
+          plan_tier: "free" | "starter" | "founder" | "studio" | "pro";
+          monthly_credits: number;
+          purchased_credits: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          stripe_customer_id?: string | null;
+          plan_tier?: "free" | "starter" | "founder" | "studio" | "pro";
+          monthly_credits?: number;
+          purchased_credits?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          stripe_customer_id?: string | null;
+          plan_tier?: "free" | "starter" | "founder" | "studio" | "pro";
+          monthly_credits?: number;
+          purchased_credits?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_unlocked_markets: {
+        Row: {
+          id: string;
+          user_id: string;
+          genre_id: string;
+          unlocked_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          genre_id: string;
+          unlocked_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          genre_id?: string;
+          unlocked_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "user_unlocked_markets_genre_id_fkey";
+            columns: ["genre_id"];
+            isOneToOne: false;
+            referencedRelation: "genres";
+            referencedColumns: ["id"];
+          }
+        ];
       };
     };
     Views: {

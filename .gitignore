@@ -49,6 +49,7 @@ test-screenshots/
 coverage/
 .nyc_output/
 .turbo/
+supabase/.temp/
 
 # OS・エディタ固有ファイル
 .DS_Store

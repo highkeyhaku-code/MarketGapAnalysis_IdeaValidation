@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Zap,
 } from "lucide-react";
+import { computeMarketTags } from "../lib/marketTags";
 
 export interface GenreItem {
   id: string;
@@ -296,21 +297,38 @@ export function MarketGenreDirectory({
                         }`}
                       >
                         <div>
-                          {/* ステータスバッジ */}
+                          {/* ステータスバッジ (決定論的 5種市場タグ) */}
                           <div className="flex items-center justify-between text-xs mb-2.5">
-                            {isStagnant ? (
-                              <span className="px-2.5 py-0.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-md font-mono text-[10px] flex items-center space-x-1">
-                                <Skull className="w-3 h-3 text-rose-400" />
-                                <span>☠️ 巨人の墓場 (Stagnant)</span>
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-md font-mono text-[10px] flex items-center space-x-1">
-                                <Flame className="w-3 h-3 text-emerald-400" />
-                                <span>High Gravity White-Space</span>
-                              </span>
-                            )}
+                            <div className="flex flex-wrap items-center gap-1">
+                              {(() => {
+                                const l2Tags = computeMarketTags(
+                                  {
+                                    status: l2.status,
+                                    rawTextCorpus: `${l2.canonical_name} ${l2.description || ""}`,
+                                  },
+                                  l2.status
+                                );
+                                if (l2Tags.length > 0) {
+                                  return l2Tags.map((tag) => (
+                                    <span
+                                      key={tag.id}
+                                      title={tag.description}
+                                      className={`px-2 py-0.5 rounded-md font-mono text-[9px] font-bold border flex items-center space-x-1 ${tag.colorClass.badgeBg}`}
+                                    >
+                                      <span>{tag.label}</span>
+                                    </span>
+                                  ));
+                                }
+                                return (
+                                  <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-md font-mono text-[9px] font-bold flex items-center space-x-1">
+                                    <Flame className="w-3 h-3 text-emerald-400" />
+                                    <span>Active Market</span>
+                                  </span>
+                                );
+                              })()}
+                            </div>
 
-                            <span className="text-[10px] font-mono text-slate-500">L2 Core</span>
+                            <span className="text-[10px] font-mono text-slate-500 shrink-0 ml-2">L2 Core</span>
                           </div>
 
                           {/* タイトル */}

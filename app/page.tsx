@@ -20,6 +20,11 @@ import { TheGarageKanban } from "../components/TheGarageKanban";
 import { JobPollingTracker } from "../components/JobPollingTracker";
 import { GravityMapVisualizer, GravityMapData } from "../components/GravityMapVisualizer";
 import { MarketGenreDirectory } from "../components/MarketGenreDirectory";
+import { GarageHeader } from "../components/GarageHeader";
+import { PricingModal } from "../components/PricingModal";
+import { AuthWallModal } from "../components/AuthWallModal";
+import { GuestMigrationModal } from "../components/GuestMigrationModal";
+import { useUserSession } from "../hooks/useUserSession";
 
 export default function GarageDashboard() {
   const router = useRouter();
@@ -30,6 +35,16 @@ export default function GarageDashboard() {
   const [analyzingGenreName, setAnalyzingGenreName] = useState<string>("");
   const [mapResult, setMapResult] = useState<GravityMapData | null>(null);
   const [isTriggering, setIsTriggering] = useState(false);
+
+  // プログレッシブサインアップ & セッション管理
+  const {
+    user,
+    showAuthWall,
+    showMigrationModal,
+    closeAuthWall,
+    handleMigrationCompleted,
+    handleMigrationDiscarded,
+  } = useUserSession();
 
   React.useEffect(() => {
     if (typeof window !== "undefined") {
@@ -85,71 +100,8 @@ export default function GarageDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white pb-16">
-      {/* ナビゲーションバー */}
-      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-lg sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab("kanban")}>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center shadow-[0_0_16px_rgba(99,102,241,0.5)]">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <span className="font-black text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                THE GARAGE
-              </span>
-              <span className="ml-2 px-2 py-0.5 text-[10px] font-mono uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-md">
-                v2.0 Beta
-              </span>
-            </div>
-          </div>
-
-          {/* モード切替タブ */}
-          <div className="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setActiveTab("kanban")}
-              className={`flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "kanban"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span>Kanban Hub</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("discover")}
-              className={`flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "discover"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Compass className="w-4 h-4" />
-              <span>Discover (重力マップ)</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("validate")}
-              className={`flex items-center space-x-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "validate"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <GitBranch className="w-4 h-4" />
-              <span>Validate (Git for Ideas)</span>
-            </button>
-          </div>
-
-          <div className="flex items-center space-x-3 text-xs">
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl">
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-slate-400">Credits:</span>
-              <span className="font-mono font-bold text-amber-300">10 pts</span>
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* ナビゲーションバー (GarageHeader) */}
+      <GarageHeader activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* メインコンテンツ */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
@@ -231,6 +183,27 @@ export default function GarageDashboard() {
           </div>
         )}
       </main>
+
+      {/* プラン選択 & 追加クレジット購入モーダル */}
+      <PricingModal />
+
+      {/* 認証ウォール & ゲスト移行モーダル */}
+      <AuthWallModal
+        isOpen={showAuthWall}
+        onClose={closeAuthWall}
+        title="アカウント連携で仮説・市場マップを永続化する"
+        description="作成した仮説や探索した市場データを安全に保護し、追加の機能を利用するにはログインが必要です。"
+      />
+
+      <GuestMigrationModal
+        isOpen={showMigrationModal}
+        userEmail={user?.email}
+        onMigrated={(count) => {
+          handleMigrationCompleted(count);
+          window.location.reload();
+        }}
+        onDiscarded={handleMigrationDiscarded}
+      />
     </div>
   );
 }
