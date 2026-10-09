@@ -14,7 +14,8 @@
     "test:pipeline": "tsx ./scripts/test-pipeline-robustness-audit.mjs",
     "test:e2e:inngest": "tsx ./scripts/test-inngest-e2e-commit.mjs",
     "test:billing": "tsx ./scripts/test-hybrid-billing-and-progressive-signup.mjs",
-    "test:e2e:prod": "tsx ./scripts/test-production-e2e-lifecycle.mjs"
+    "test:e2e:prod": "tsx ./scripts/test-production-e2e-lifecycle.mjs",
+    "test:portfolio": "tsx --env-file=.env.local ./scripts/test-portfolio-mode.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

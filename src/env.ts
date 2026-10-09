@@ -34,6 +34,9 @@ export const serverEnvSchema = z.object({
 
   // 8. Site URL
   NEXT_PUBLIC_SITE_URL: z.string().optional(),
+
+  // 9. Portfolio Mode (Demo)
+  NEXT_PUBLIC_PORTFOLIO_MODE: z.string().optional(),
 });
 
 /**
@@ -55,6 +58,7 @@ export const clientEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   NEXT_PUBLIC_SITE_URL: z.string().optional(),
+  NEXT_PUBLIC_PORTFOLIO_MODE: z.string().optional(),
 });
 
 export const envSchema = isBrowser ? clientEnvSchema : serverEnvSchema;
@@ -75,6 +79,7 @@ const rawEnv = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+  NEXT_PUBLIC_PORTFOLIO_MODE: process.env.NEXT_PUBLIC_PORTFOLIO_MODE,
 };
 
 /**

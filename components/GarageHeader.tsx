@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useBillingStore } from "../lib/store/useBillingStore";
 import { useUserSession } from "../hooks/useUserSession";
+import { isPortfolioMode } from "../lib/portfolio";
 import { supabase } from "../lib/supabaseClient";
 
 interface GarageHeaderProps {
@@ -236,13 +237,20 @@ export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeader
 
             {/* ユーザーアカウント & ログイン導線 */}
             {isGuest ? (
-              <button
-                onClick={openAuthWall}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer shadow-md shadow-indigo-600/30"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>ログイン</span>
-              </button>
+              isPortfolioMode() ? (
+                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-bold text-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>デモモード</span>
+                </div>
+              ) : (
+                <button
+                  onClick={openAuthWall}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer shadow-md shadow-indigo-600/30"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>ログイン</span>
+                </button>
+              )
             ) : (
               <div className="flex items-center space-x-2">
                 <div

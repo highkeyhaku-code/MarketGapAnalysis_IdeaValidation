@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useBillingStore, PlanTier } from "../lib/store/useBillingStore";
 import { useUserSession } from "../hooks/useUserSession";
+import { isPortfolioMode } from "../lib/portfolio";
 
 interface PlanConfig {
   id: PlanTier;
@@ -95,15 +96,62 @@ const PLANS: PlanConfig[] = [
 ];
 
 export function PricingModal() {
-  const { isPricingModalOpen, closePricingModal, planTier, monthlyCredits, purchasedCredits } = useBillingStore();
+  const {
+    isPricingModalOpen,
+    closePricingModal,
+    planTier,
+    monthlyCredits,
+    purchasedCredits,
+    updateLocalCredits,
+  } = useBillingStore();
   const { user, openAuthWall } = useUserSession();
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   if (!isPricingModalOpen) return null;
 
   const handleCheckout = async (mode: "subscription" | "payment", targetTier?: PlanTier, creditsAmount?: number) => {
-    // 未ログインの場合は Auth Wall を先に案内
+    // ポートフォリオモード時の擬似決済（モック）処理
+    if (isPortfolioMode()) {
+      const actionKey = mode === "payment" ? "credits_30" : targetTier || "subscription";
+      setLoadingAction(actionKey);
+      setErrorMsg(null);
+
+      try {
+        // 短いディレイでリアルなUXを演出
+        await new Promise((resolve) => setTimeout(resolve, 350));
+
+        if (mode === "payment") {
+          // 買い切りクレジット追加パック (+30 pts など)
+          const addAmount = creditsAmount || 30;
+          updateLocalCredits({
+            purchasedCredits: purchasedCredits + addAmount,
+          });
+        } else if (mode === "subscription" && targetTier) {
+          // サブスクリプションプランアップグレード
+          const targetPlan = PLANS.find((p) => p.id === targetTier);
+          const planMonthly = targetPlan ? targetPlan.monthlyCredits : 50;
+          updateLocalCredits({
+            planTier: targetTier,
+            monthlyCredits: planMonthly,
+          });
+        }
+
+        // トースト通知を表示
+        setToastMessage("🎉 デモモード: クレジットが無料で追加されました");
+        setTimeout(() => {
+          setToastMessage(null);
+        }, 4000);
+      } catch (err: any) {
+        setErrorMsg(`擬似決済エラー: ${err.message}`);
+      } finally {
+        setLoadingAction(null);
+      }
+      return;
+    }
+
+    // 本番モード: 未ログインの場合は Auth Wall を案内
     if (!user) {
       closePricingModal();
       openAuthWall();
@@ -149,6 +197,29 @@ export function PricingModal() {
         >
           <X className="w-5 h-5" />
         </button>
+
+        {/* 🎉 デモモード トースト通知 */}
+        {toastMessage && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-indigo-500/20 border border-emerald-400/50 text-emerald-100 flex items-center justify-between shadow-2xl animate-in slide-in-from-top-3 duration-300">
+            <div className="flex items-center space-x-3">
+              <span className="text-2xl animate-bounce">🎉</span>
+              <div>
+                <div className="font-extrabold text-sm text-emerald-300">
+                  {toastMessage}
+                </div>
+                <div className="text-[11px] text-slate-300">
+                  クレジットがウォレット残高に即時反映されました（無料シミュレーション）。
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="p-1.5 hover:bg-emerald-500/20 rounded-xl text-emerald-300 transition text-xs font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* ヘッダータイトル */}
         <div className="text-center space-y-2 max-w-2xl mx-auto">

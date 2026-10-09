@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { ShieldCheck, Sparkles, X, ArrowRight, Lock } from "lucide-react";
+import { isPortfolioMode } from "@/lib/portfolio";
 
 interface AuthWallModalProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ export const AuthWallModal: React.FC<AuthWallModalProps> = ({
   const [loadingProvider, setLoadingProvider] = useState<"github" | "google" | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  if (!isOpen || isPortfolioMode()) return null;
 
   const handleOAuthSignIn = async (provider: "github" | "google") => {
     setLoadingProvider(provider);

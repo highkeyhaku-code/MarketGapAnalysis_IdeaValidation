@@ -7,6 +7,7 @@ import { compressFrictionCorpus } from "@/lib/compressFrictionCorpus";
 import { evaluateMarketBatch, MarketEvaluationResult } from "@/lib/ai/evaluateMarket";
 import { getUserCreditsProfile, isMarketUnlocked, PlanTier } from "@/lib/credits";
 import { computeMarketTags } from "@/lib/marketTags";
+import { isPortfolioMode } from "@/lib/portfolio";
 import { Json } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -89,10 +90,15 @@ export async function GET(
     }
 
     // 権限判定 (Founder / Studio は全開放、それ以外は user_unlocked_markets を参照)
+    // ポートフォリオモード時はローカルストレージのアンロック状態 (?unlocked=true) を尊重
     let isUnlocked = false;
     let userPlanTier: PlanTier = "free";
 
-    if (userId) {
+    if (isPortfolioMode() && searchParams.get("unlocked") === "true") {
+      isUnlocked = true;
+    }
+
+    if (!isUnlocked && userId) {
       try {
         const profile = await getUserCreditsProfile(userId);
         userPlanTier = profile.plan_tier;

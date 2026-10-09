@@ -34,6 +34,7 @@ import { GuestMigrationModal } from "./GuestMigrationModal";
 import { PricingModal } from "./PricingModal";
 import { useUserSession } from "../hooks/useUserSession";
 import { upsertDraftToGuestSession } from "../lib/guestSession";
+import { isPortfolioMode } from "../lib/portfolio";
 
 export type KanbanColumnId = "DRAFT" | "DISCOVERED" | "VALIDATING" | "VALIDATED" | "ARCHIVED";
 
@@ -251,7 +252,7 @@ export function TheGarageKanban() {
 
     // [ケース 2]: DISCOVERED -> VALIDATING (Inngest 検証ジョブ起動)
     if (sourceCol === "DISCOVERED" && destCol === "VALIDATING") {
-      if (isGuest) {
+      if (!isPortfolioMode() && isGuest) {
         openAuthWall();
         showToast("🔒 検証ジョブの実行にはアカウント連携が必要です", "warning");
         return;
@@ -498,22 +499,30 @@ export function TheGarageKanban() {
             <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
             <div className="space-y-0.5">
               <div className="flex items-center space-x-2">
-                <span className="font-bold text-amber-300">ローカル保存データ（ゲストセッション: 48時間限定）</span>
+                <span className="font-bold text-amber-300">
+                  {isPortfolioMode()
+                    ? "ポートフォリオ・デモモード（完全ゲスト動作中）"
+                    : "ローカル保存データ（ゲストセッション: 48時間限定）"}
+                </span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  隔離保護中
+                  {isPortfolioMode() ? "Demo Portfolio" : "隔離保護中"}
                 </span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                お使いのブラウザ内（LocalStorage）のみに安全に保持されています。他人のデータが表示されることは一切ありません。
+                {isPortfolioMode()
+                  ? "お使いのブラウザ内（LocalStorage）に安全に保持されます。ログイン不要で極限検証や探索など全機能を無制限に体験いただけます。"
+                  : "お使いのブラウザ内（LocalStorage）のみに安全に保持されています。他人のデータが表示されることは一切ありません。"}
               </p>
             </div>
           </div>
-          <button
-            onClick={openAuthWall}
-            className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-bold text-xs rounded-xl shadow-md transition cursor-pointer shrink-0"
-          >
-            ログインしてクラウド永続化
-          </button>
+          {!isPortfolioMode() && (
+            <button
+              onClick={openAuthWall}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-bold text-xs rounded-xl shadow-md transition cursor-pointer shrink-0"
+            >
+              ログインしてクラウド永続化
+            </button>
+          )}
         </div>
       )}
 

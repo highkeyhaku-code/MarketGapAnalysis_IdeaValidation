@@ -8,6 +8,7 @@ import {
   purgeGuestSession,
   GuestSession,
 } from "@/lib/guestSession";
+import { isPortfolioMode } from "@/lib/portfolio";
 
 export interface UserSessionState {
   user: any | null;
@@ -87,9 +88,16 @@ export const sessionStore = createStore<UserSessionState>((set, get) => ({
   setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
   setGuestSession: (session) => set({ guestSession: session }),
-  openAuthWall: () => set({ showAuthWall: true }),
+  openAuthWall: () => {
+    // ポートフォリオモード時はモーダルを一切起動させない
+    if (isPortfolioMode()) return;
+    set({ showAuthWall: true });
+  },
   closeAuthWall: () => set({ showAuthWall: false }),
-  openMigrationModal: () => set({ showMigrationModal: true }),
+  openMigrationModal: () => {
+    if (isPortfolioMode()) return;
+    set({ showMigrationModal: true });
+  },
   closeMigrationModal: () => set({ showMigrationModal: false }),
   handleMigrationCompleted: (count: number) => {
     set({ showMigrationModal: false, guestSession: null });
@@ -121,7 +129,7 @@ export function useUserSession() {
         sessionStore.setState({ guestSession: currentGuest });
 
         // ログイン済みかつ未移行のゲストデータがある場合、引き継ぎ確認モーダルを表示
-        if (currentUser && currentGuest && currentGuest.draftIdeas.length > 0) {
+        if (!isPortfolioMode() && currentUser && currentGuest && currentGuest.draftIdeas.length > 0) {
           sessionStore.setState({ showMigrationModal: true });
         }
       } catch (err) {
@@ -139,7 +147,7 @@ export function useUserSession() {
         const currentGuest = getGuestSession();
         sessionStore.setState({ user: currentUser, guestSession: currentGuest });
 
-        if (event === "SIGNED_IN" && currentUser) {
+        if (!isPortfolioMode() && event === "SIGNED_IN" && currentUser) {
           if (currentGuest && currentGuest.draftIdeas.length > 0) {
             sessionStore.setState({ showMigrationModal: true });
           }

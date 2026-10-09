@@ -24,6 +24,11 @@ import { PricingModal } from "../../../components/PricingModal";
 import { useBillingStore } from "../../../lib/store/useBillingStore";
 import { useUserSession } from "../../../hooks/useUserSession";
 import { computeMarketTags, MarketTagBadge } from "../../../lib/marketTags";
+import {
+  isPortfolioMode,
+  isLocalMarketUnlocked,
+  addLocalUnlockedMarket,
+} from "../../../lib/portfolio";
 
 /**
  * 1. 専用マップ画面 (Dedicated Immersive Map Page)
@@ -50,14 +55,23 @@ export default function DedicatedMarketMapPage() {
   const { planTier, totalCredits, openPricingModal, fetchCredits } = useBillingStore();
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // アンロック状態の判定
   useEffect(() => {
     async function checkUnlockStatus() {
-      if (planTier === "founder") {
+      if (planTier === "founder" || planTier === "studio") {
         setIsUnlocked(true);
         return;
       }
+
+      // ポートフォリオモード時はローカルストレージ (LocalStorage) を参照
+      if (isPortfolioMode()) {
+        const localUnlocked = isLocalMarketUnlocked(genreId);
+        setIsUnlocked(localUnlocked);
+        return;
+      }
+
       try {
         const url = user?.id
           ? `/api/market/unlocked?genreId=${encodeURIComponent(genreId)}&userId=${encodeURIComponent(user.id)}`
@@ -76,46 +90,31 @@ export default function DedicatedMarketMapPage() {
     }
   }, [genreId, user?.id, planTier]);
 
-  // 3クレジットでのアンロック実行
-  const handleUnlockMarket = async () => {
-    if (isGuest) {
-      openAuthWall();
-      return;
-    }
-    try {
-      setUnlocking(true);
-      const res = await fetch("/api/market/unlocked", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ genreId, userId: user.id }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setIsUnlocked(true);
-        fetchCredits(user.id);
-      } else {
-        alert(json.error || "アンロックに失敗しました（クレジット残高を確認してください）");
-      }
-    } catch (err: any) {
-      alert("通信エラー: " + err.message);
-    } finally {
-      setUnlocking(false);
-    }
-  };
-
-  const fetchMap = async () => {
+  const fetchMap = async (forceUnlocked?: boolean) => {
     try {
       setLoading(true);
       setErrorMessage(null);
-      const url = user?.id
+      const isLocallyUnlocked = forceUnlocked || isUnlocked || (isPortfolioMode() && isLocalMarketUnlocked(genreId)) || planTier === "founder" || planTier === "studio";
+
+      let url = user?.id
         ? `/api/market/map/${genreId}?userId=${encodeURIComponent(user.id)}`
         : `/api/market/map/${genreId}`;
+
+      // ポートフォリオモードでローカルアンロック済みの場合、サニタイズをバイパスするパラメータを付与
+      if (isPortfolioMode() && isLocallyUnlocked) {
+        url += (url.includes("?") ? "&" : "?") + "unlocked=true";
+      }
+
       const res = await fetch(url);
       const json = await res.json();
 
       if (json.success && json.mapData) {
         setMapData(json.mapData);
-        setIsUnlocked(json.isUnlocked ?? !json.isLocked);
+        if (isPortfolioMode()) {
+          setIsUnlocked(isLocallyUnlocked);
+        } else {
+          setIsUnlocked(json.isUnlocked ?? !json.isLocked);
+        }
         setGenreMetadata({
           status: json.mapData.status || "active",
           description: json.mapData.description,
@@ -137,6 +136,71 @@ export default function DedicatedMarketMapPage() {
       fetchMap();
     }
   }, [genreId, user?.id]);
+
+  // 未踏市場のアンロック実行 (ポートフォリオモード時は1pt消費でローカル管理)
+  const handleUnlockMarket = async () => {
+    // ポートフォリオモード時のフォールバック処理 (完全ゲスト・ローカル完結)
+    if (isPortfolioMode()) {
+      const { totalCredits, monthlyCredits, purchasedCredits, updateLocalCredits } = useBillingStore.getState();
+
+      if (totalCredits < 1) {
+        alert("デモ用クレジットが不足しています。プラン画面から無料でクレジットを追加してください。");
+        openPricingModal();
+        return;
+      }
+
+      try {
+        setUnlocking(true);
+        // 1 pt 消費 (ハイブリッド優先順位: 月次枠 > 買い切り枠)
+        if (monthlyCredits > 0) {
+          updateLocalCredits({ monthlyCredits: monthlyCredits - 1 });
+        } else {
+          updateLocalCredits({ purchasedCredits: Math.max(0, purchasedCredits - 1) });
+        }
+
+        // LocalStorage にアンロック済み genreId を保存
+        addLocalUnlockedMarket(genreId);
+        setIsUnlocked(true);
+
+        // マップデータをアンロック状態で再取得
+        await fetchMap(true);
+
+        // トースト通知を表示
+        setToastMessage("🎉 デモモード: 未踏市場をローカルでアンロックしました（1 pt 消費）");
+        setTimeout(() => setToastMessage(null), 4000);
+      } catch (err: any) {
+        alert("ローカルアンロックエラー: " + err.message);
+      } finally {
+        setUnlocking(false);
+      }
+      return;
+    }
+
+    if (isGuest) {
+      openAuthWall();
+      return;
+    }
+    try {
+      setUnlocking(true);
+      const res = await fetch("/api/market/unlocked", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ genreId, userId: user.id }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setIsUnlocked(true);
+        fetchCredits(user.id);
+        await fetchMap(true);
+      } else {
+        alert(json.error || "アンロックに失敗しました（クレジット残高を確認してください）");
+      }
+    } catch (err: any) {
+      alert("通信エラー: " + err.message);
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   // 手動キャッシュパージ & 再解析 (2クレジット消費)
   const handleRevalidate = async () => {
@@ -328,7 +392,9 @@ export default function DedicatedMarketMapPage() {
                     未知の市場領域（アンロックが必要）
                   </h3>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    この市場の引力トポロジー・各社の摩擦スコア（Friction）・クレーター深層成分は保護されています。3クレジットを消費してアンロックすると、解約後も永久に再課金なしで閲覧できます。
+                    {isPortfolioMode()
+                      ? "この市場の引力トポロジー・各社の摩擦スコア（Friction）・クレーター深層成分はデモ保護されています。1クレジットを消費してローカルでアンロックできます。"
+                      : "この市場の引力トポロジー・各社の摩擦スコア（Friction）・クレーター深層成分は保護されています。3クレジットを消費してアンロックすると、解約後も永久に再課金なしで閲覧できます。"}
                   </p>
                 </div>
                 <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
@@ -342,7 +408,7 @@ export default function DedicatedMarketMapPage() {
                     ) : (
                       <Zap className="w-4 h-4 fill-slate-950" />
                     )}
-                    <span>3クレジットでアンロック</span>
+                    <span>{isPortfolioMode() ? "1クレジットでアンロック (Demo)" : "3クレジットでアンロック"}</span>
                   </button>
                   <button
                     onClick={openPricingModal}
@@ -376,6 +442,16 @@ export default function DedicatedMarketMapPage() {
         title="アカウント連携で市場データをアンロックする"
         description="市場のアンロック履歴を安全に保護し、解約後も永続的にアクセスできるようにするにはログインが必要です。"
       />
+
+      {/* トースト通知 */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 duration-300">
+          <div className="p-4 rounded-2xl shadow-2xl border text-xs font-sans flex items-center space-x-3 bg-emerald-950/95 border-emerald-500/40 text-emerald-100">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span className="font-semibold">{toastMessage}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

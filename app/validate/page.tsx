@@ -28,6 +28,7 @@ import { useUserSession } from "../../hooks/useUserSession";
 import { useBillingStore } from "../../lib/store/useBillingStore";
 import { upsertDraftToGuestSession } from "../../lib/guestSession";
 import { useIdeaStore } from "../../lib/store/useIdeaStore";
+import { isPortfolioMode } from "../../lib/portfolio";
 import { IdeaInput, PhysicalElement } from "../../schemas/zod";
 import { PivotSuggestionResponse } from "../api/ideas/pivot-suggestion/route";
 
@@ -184,7 +185,8 @@ function ValidateContent() {
       });
 
       // 未ログインの場合、アカウント永続化のために Auth Wall を表示し、コミット送信を確実に中断
-      if (isGuest && !searchParams.get("guestContinue")) {
+      // ポートフォリオモード（デモモード）時は完全ゲスト動作のため中断せず続行
+      if (!isPortfolioMode() && isGuest && !searchParams.get("guestContinue")) {
         openAuthWall();
         setIsSubmitting(false);
         return;
@@ -287,12 +289,19 @@ function ValidateContent() {
 
             {/* ログインボタン (未ログイン時) */}
             {isGuest && (
-              <button
-                onClick={openAuthWall}
-                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer"
-              >
-                ログイン
-              </button>
+              isPortfolioMode() ? (
+                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-bold text-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>デモモード</span>
+                </div>
+              ) : (
+                <button
+                  onClick={openAuthWall}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition cursor-pointer"
+                >
+                  ログイン
+                </button>
+              )
             )}
           </div>
         </div>

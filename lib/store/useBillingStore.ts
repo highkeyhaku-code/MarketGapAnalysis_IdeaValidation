@@ -2,6 +2,11 @@
 
 import { useSyncExternalStore } from "react";
 import { getGuestSession } from "../guestSession";
+import {
+  isPortfolioMode,
+  getLocalBillingProfile,
+  saveLocalBillingProfile,
+} from "../portfolio";
 
 export type PlanTier = "free" | "starter" | "founder" | "studio" | "pro";
 
@@ -84,6 +89,29 @@ export const useBillingStore = createStore<BillingState>((set, get) => ({
     try {
       set({ isLoading: true });
 
+      // ポートフォリオモード時はローカルストレージで管理
+      if (isPortfolioMode()) {
+        const localProfile = getLocalBillingProfile();
+        if (localProfile) {
+          set({
+            planTier: localProfile.planTier,
+            monthlyCredits: localProfile.monthlyCredits,
+            purchasedCredits: localProfile.purchasedCredits,
+            totalCredits: localProfile.totalCredits,
+          });
+        } else {
+          const initialProfile = {
+            planTier: "free" as PlanTier,
+            monthlyCredits: 25,
+            purchasedCredits: 0,
+            totalCredits: 25,
+          };
+          saveLocalBillingProfile(initialProfile);
+          set(initialProfile);
+        }
+        return;
+      }
+
       // 未ログインかつゲストセッションがある場合のフォールバック初期値
       const guest = getGuestSession();
       if (!userId && guest) {
@@ -119,12 +147,22 @@ export const useBillingStore = createStore<BillingState>((set, get) => ({
     const newMonthly = updates.monthlyCredits !== undefined ? updates.monthlyCredits : monthlyCredits;
     const newPurchased = updates.purchasedCredits !== undefined ? updates.purchasedCredits : purchasedCredits;
     const newTier = updates.planTier || planTier;
+    const newTotal = newMonthly + newPurchased;
 
     set({
       planTier: newTier,
       monthlyCredits: newMonthly,
       purchasedCredits: newPurchased,
-      totalCredits: newMonthly + newPurchased,
+      totalCredits: newTotal,
     });
+
+    if (isPortfolioMode()) {
+      saveLocalBillingProfile({
+        planTier: newTier,
+        monthlyCredits: newMonthly,
+        purchasedCredits: newPurchased,
+        totalCredits: newTotal,
+      });
+    }
   },
 }));
