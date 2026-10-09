@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -101,7 +101,9 @@ export default function GarageDashboard() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white pb-16">
       {/* ナビゲーションバー (GarageHeader) */}
-      <GarageHeader activeTab={activeTab} onTabChange={setActiveTab} />
+      <Suspense fallback={<div className="h-16 border-b border-slate-800/80 bg-slate-900/80 sticky top-0 z-40" />}>
+        <GarageHeader activeTab={activeTab} onTabChange={setActiveTab} />
+      </Suspense>
 
       {/* メインコンテンツ */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">

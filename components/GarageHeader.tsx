@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles,
@@ -27,28 +27,18 @@ interface GarageHeaderProps {
   onTabChange?: (tab: "kanban" | "discover" | "validate") => void;
 }
 
-export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeaderProps) {
-  const router = useRouter();
+function StripeBillingListener({
+  userId,
+  fetchCredits,
+  setToastMessage,
+}: {
+  userId?: string;
+  fetchCredits: (userId?: string) => Promise<void>;
+  setToastMessage: (msg: { text: string; type: "success" | "info" } | null) => void;
+}) {
   const searchParams = useSearchParams();
-  const { user, isGuest, openAuthWall } = useUserSession();
-  const {
-    planTier,
-    monthlyCredits,
-    purchasedCredits,
-    totalCredits,
-    openPricingModal,
-    fetchCredits,
-  } = useBillingStore();
 
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "info" } | null>(null);
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  // 1. 初回およびユーザー変更時のクレジット再取得
-  useEffect(() => {
-    fetchCredits(user?.id);
-  }, [user?.id, fetchCredits]);
-
-  // 2. Stripe 決済成功 / キャンセルリダイレクトの検知
+  // Stripe 決済成功 / キャンセルリダイレクトの検知
   useEffect(() => {
     const successType = searchParams?.get("billing_success");
     const cancelled = searchParams?.get("billing_cancelled");
@@ -69,7 +59,7 @@ export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeader
         });
       }
 
-      fetchCredits(user?.id);
+      fetchCredits(userId);
 
       // URLパラメータのクリーンアップ
       const timer = setTimeout(() => {
@@ -92,7 +82,30 @@ export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeader
       }, 4000);
       return () => clearTimeout(timer);
     }
-  }, [searchParams, user?.id, fetchCredits]);
+  }, [searchParams, userId, fetchCredits, setToastMessage]);
+
+  return null;
+}
+
+export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeaderProps) {
+  const router = useRouter();
+  const { user, isGuest, openAuthWall } = useUserSession();
+  const {
+    planTier,
+    monthlyCredits,
+    purchasedCredits,
+    totalCredits,
+    openPricingModal,
+    fetchCredits,
+  } = useBillingStore();
+
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "info" } | null>(null);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  // 1. 初回およびユーザー変更時のクレジット再取得
+  useEffect(() => {
+    fetchCredits(user?.id);
+  }, [user?.id, fetchCredits]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -274,6 +287,15 @@ export function GarageHeader({ activeTab = "kanban", onTabChange }: GarageHeader
           </div>
         </div>
       </header>
+
+      {/* Stripe 決済URLリダイレクト検知リスナー (Suspense境界で安全に分離) */}
+      <Suspense fallback={null}>
+        <StripeBillingListener
+          userId={user?.id}
+          fetchCredits={fetchCredits}
+          setToastMessage={setToastMessage}
+        />
+      </Suspense>
 
       {/* Stripe 完了 / キャンセルトースト通知 */}
       {toastMessage && (
