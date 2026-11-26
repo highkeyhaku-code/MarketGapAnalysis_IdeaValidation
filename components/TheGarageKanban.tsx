@@ -54,6 +54,7 @@ export interface KanbanCardItem {
   createdAt: string;
   jobId?: string;
   parentCommitId?: string | null;
+  isLocalDraft?: boolean;
 }
 
 const COLUMN_CONFIG: Record<
@@ -146,6 +147,7 @@ export function TheGarageKanban() {
             badgeText: "v1 (Local 48h TTL)",
             columnId: "DRAFT",
             createdAt: draft.createdAt,
+            isLocalDraft: true,
           }));
 
           setCards(localCards);
@@ -259,6 +261,10 @@ export function TheGarageKanban() {
       }
       showToast(`🚀 [${card.title}] の仮説クラッシュジョブを起動しました...`, "info");
       
+      let createdJobId: string | undefined;
+      let createdCommitId: string | undefined;
+      let createdIdeaId: string | undefined;
+
       try {
         const res = await fetch("/api/ideas/commit", {
           method: "POST",
@@ -272,19 +278,39 @@ export function TheGarageKanban() {
               q4_monetization_model: "subscription",
               q4_supplementary_pains: [],
             },
-            ideaId: card.ideaId,
+            ideaId: card.isLocalDraft ? null : card.ideaId,
+            parentCommitId: card.isLocalDraft ? null : (card.commitId || null),
             domain: "B2B_SME",
           }),
         });
         const json = await res.json();
         if (json.success) {
-          card.jobId = json.jobId;
-          card.commitId = json.commitId;
+          createdJobId = json.jobId;
+          createdCommitId = json.commitId;
+          createdIdeaId = json.ideaId;
           showToast(`⚡ 検証中: Inngest Job #${json.jobId.slice(0, 8)} 進行中`, "success");
         }
       } catch (err) {
         console.warn("Failed to trigger validation job:", err);
       }
+
+      // 状態を更新して終了
+      setCards((prev) =>
+        prev.map((c) => {
+          if (c.id === draggableId) {
+            return {
+              ...c,
+              columnId: destCol,
+              jobId: createdJobId || c.jobId,
+              commitId: createdCommitId || c.commitId,
+              ideaId: createdIdeaId || c.ideaId,
+              isLocalDraft: createdIdeaId ? false : c.isLocalDraft,
+            };
+          }
+          return c;
+        })
+      );
+      return;
     }
 
     // [ケース 3]: VALIDATING -> DRAFT or ARCHIVED (実行中ジョブのキャンセル)
@@ -334,6 +360,7 @@ export function TheGarageKanban() {
           badgeText: "v1 (Local 48h TTL)",
           columnId: "DRAFT",
           createdAt: new Date().toISOString(),
+          isLocalDraft: true,
         };
 
         upsertDraftToGuestSession({
@@ -430,6 +457,8 @@ export function TheGarageKanban() {
     try {
       showToast("🚀 アイデアコミットを作成し、仮説クラッシュ検証を開始します...", "info");
       
+      const isLocal = Boolean(editingCardForWizard.isLocalDraft);
+
       const res = await fetch("/api/ideas/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -442,8 +471,8 @@ export function TheGarageKanban() {
             q4_monetization_model: data.q4_monetization_model || "subscription",
             q4_supplementary_pains: data.q4_supplementary_pains || [],
           },
-          ideaId: editingCardForWizard.ideaId,
-          parentCommitId: editingCardForWizard.commitId || null,
+          ideaId: isLocal ? null : editingCardForWizard.ideaId,
+          parentCommitId: isLocal ? null : (editingCardForWizard.commitId || null),
           visibilityFlags: data.visibilityFlags,
           domain: "B2B_SME",
         }),
@@ -451,10 +480,12 @@ export function TheGarageKanban() {
 
       const json = await res.json();
       if (json.success && json.commitId) {
+        const targetIdeaId = json.ideaId || editingCardForWizard.ideaId;
+        const jobQuery = json.jobId ? `&jobId=${encodeURIComponent(json.jobId)}` : "";
         setEditingCardForWizard(null);
         showToast("⚡ 検証ジョブが正常にキックされました。リポジトリ詳細へ遷移します...", "success");
         // リポジトリ詳細画面へ即時ルーティング
-        router.push(`/ideas/${editingCardForWizard.ideaId}?commitId=${json.commitId}`);
+        router.push(`/ideas/${targetIdeaId}?commitId=${json.commitId}${jobQuery}`);
       } else {
         alert(`Failed to start validation: ${json.error || "Unknown error"}`);
       }

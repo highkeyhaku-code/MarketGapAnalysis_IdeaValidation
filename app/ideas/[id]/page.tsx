@@ -51,6 +51,7 @@ function IdeaRepositoryContent() {
   const router = useRouter();
   const ideaId = params?.id as string;
   const initialCommitIdParam = searchParams.get("commitId");
+  const initialJobIdParam = searchParams.get("jobId");
 
   const [loading, setLoading] = useState(true);
   const [ideaData, setIdeaData] = useState<any>(null);
@@ -686,7 +687,12 @@ function IdeaRepositoryContent() {
                   </p>
                 </div>
                 <JobPollingTracker
-                  jobId={selectedCommit.id}
+                  jobId={
+                    initialJobIdParam &&
+                    (!initialCommitIdParam || selectedCommit.id === initialCommitIdParam)
+                      ? initialJobIdParam
+                      : selectedCommit.id
+                  }
                   onComplete={() => fetchIdeaRepository()}
                   onError={() => fetchIdeaRepository()}
                   onRetry={() => fetchIdeaRepository()}
