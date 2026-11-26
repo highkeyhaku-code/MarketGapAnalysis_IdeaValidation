@@ -2,17 +2,19 @@
 
 import { useSyncExternalStore, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { ensurePortfolioAnonymousSession } from "@/lib/authClient";
 import {
   getGuestSession,
   hasPendingGuestData,
-  purgeGuestSession,
   GuestSession,
 } from "@/lib/guestSession";
 import { isPortfolioMode } from "@/lib/portfolio";
 
 export interface UserSessionState {
   user: any | null;
+  accessToken: string | null;
   loading: boolean;
+  authError: string | null;
   guestSession: GuestSession | null;
   showAuthWall: boolean;
   showMigrationModal: boolean;
@@ -80,7 +82,9 @@ function createStore<T extends object>(
 
 export const sessionStore = createStore<UserSessionState>((set, get) => ({
   user: null,
+  accessToken: null,
   loading: true,
+  authError: null,
   guestSession: null,
   showAuthWall: false,
   showMigrationModal: false,
@@ -121,15 +125,36 @@ export function useUserSession() {
     async function initSession() {
       try {
         const { data } = await supabase.auth.getSession();
-        const currentUser = data.session?.user || null;
-        sessionStore.setState({ user: currentUser });
+        let currentSession = data.session || null;
+        let currentUser = currentSession?.user || null;
+        let authError: string | null = null;
+
+        // ポートフォリオモードかつ未サインインの場合、ブラウザ固有の匿名ユーザーを自動発行
+        if (!currentUser && isPortfolioMode()) {
+          const anonResult = await ensurePortfolioAnonymousSession();
+          currentSession = anonResult.session;
+          currentUser = anonResult.user;
+          authError = anonResult.error || null;
+        }
+
+        sessionStore.setState({
+          user: currentUser,
+          accessToken: currentSession?.access_token || null,
+          authError,
+        });
 
         // 初期ロード時に 48h TTL パージを確実に発火
         const currentGuest = getGuestSession();
         sessionStore.setState({ guestSession: currentGuest });
 
-        // ログイン済みかつ未移行のゲストデータがある場合、引き継ぎ確認モーダルを表示
-        if (!isPortfolioMode() && currentUser && currentGuest && currentGuest.draftIdeas.length > 0) {
+        // 本ログイン済み（非匿名）かつ未移行のゲストデータがある場合、引き継ぎ確認モーダルを表示
+        if (
+          !isPortfolioMode() &&
+          currentUser &&
+          !currentUser.is_anonymous &&
+          currentGuest &&
+          currentGuest.draftIdeas.length > 0
+        ) {
           sessionStore.setState({ showMigrationModal: true });
         }
       } catch (err) {
@@ -145,9 +170,19 @@ export function useUserSession() {
       async (event, session) => {
         const currentUser = session?.user || null;
         const currentGuest = getGuestSession();
-        sessionStore.setState({ user: currentUser, guestSession: currentGuest });
+        sessionStore.setState({
+          user: currentUser,
+          accessToken: session?.access_token || null,
+          authError: currentUser ? null : sessionStore.getState().authError,
+          guestSession: currentGuest,
+        });
 
-        if (!isPortfolioMode() && event === "SIGNED_IN" && currentUser) {
+        if (
+          !isPortfolioMode() &&
+          event === "SIGNED_IN" &&
+          currentUser &&
+          !currentUser.is_anonymous
+        ) {
           if (currentGuest && currentGuest.draftIdeas.length > 0) {
             sessionStore.setState({ showMigrationModal: true });
           }
@@ -160,9 +195,15 @@ export function useUserSession() {
     };
   }, []);
 
+  const isAnonymous = Boolean(state.user?.is_anonymous);
+  const hasSession = Boolean(state.user?.id);
+
   return {
     ...state,
-    isGuest: !state.user,
+    isAnonymous,
+    hasSession,
+    // 匿名ユーザーは「アカウント登録前のゲスト扱い」を維持しつつ、hasSession/user.id で専用DB領域を持つ
+    isGuest: !state.user || isAnonymous,
     hasGuestData: hasPendingGuestData(),
   };
 }

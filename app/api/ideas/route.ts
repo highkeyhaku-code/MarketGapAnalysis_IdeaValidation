@@ -1,24 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../lib/supabaseClient";
+import {
+  supabaseAdmin,
+  getDefaultOrAuthUserId,
+  getAuthenticatedUserIdFromRequest,
+} from "../../../lib/supabaseClient";
 
 /**
  * アイデア & コミット一覧取得 API
  * GET /api/ideas
+ * - Authorization: Bearer <Supabase JWT> がある場合は、検証済み auth.uid() のアイデアのみを厳格に返却
+ * - 未認証・userId未指定時はデータ漏洩防止のため空配列を返却
  */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const requestedUserId = searchParams.get("userId");
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
+
+    // JWT が検証できた場合は必ず自身のユーザーIDを強制（他人の userId 指定を無効化）
+    const targetUserId = authUserId || requestedUserId;
+
+    if (!targetUserId) {
+      return NextResponse.json({ success: true, ideas: [] });
+    }
 
     // 1. まず active_commit_id を含むクエリを試行
     let query = supabaseAdmin
       .from("ideas")
       .select("id, title, active_commit_id, created_at, updated_at, user_id, idea_commits(*)")
+      .eq("user_id", targetUserId)
       .order("created_at", { ascending: false });
-
-    if (requestedUserId) {
-      query = query.eq("user_id", requestedUserId);
-    }
 
     let ideasData: any[] | null = null;
     const tryWithActiveCommit = await query;
@@ -29,14 +40,11 @@ export async function GET(req: NextRequest) {
         "[API /api/ideas GET] Query with active_commit_id failed, falling back to base schema:",
         tryWithActiveCommit.error.message
       );
-      let fallbackQuery = supabaseAdmin
+      const fallbackQuery = supabaseAdmin
         .from("ideas")
         .select("id, title, created_at, updated_at, user_id, idea_commits(*)")
+        .eq("user_id", targetUserId)
         .order("created_at", { ascending: false });
-
-      if (requestedUserId) {
-        fallbackQuery = fallbackQuery.eq("user_id", requestedUserId);
-      }
 
       const resFallback = await fallbackQuery;
       if (resFallback.error) {
@@ -87,7 +95,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const userId = await getDefaultOrAuthUserId(body.userId);
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
+    const userId = authUserId || (await getDefaultOrAuthUserId(body.userId));
     const title = body.title || "新規仮説ドラフト";
     const ideaId = crypto.randomUUID();
     const commitId = crypto.randomUUID();

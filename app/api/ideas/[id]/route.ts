@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseClient";
+import { supabaseAdmin, getAuthenticatedUserIdFromRequest } from "../../../../lib/supabaseClient";
 
 /**
  * 単一アイデア（リポジトリ）& 全コミット履歴取得 API
  * GET /api/ideas/[id]
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -14,6 +14,8 @@ export async function GET(
     if (!id) {
       return NextResponse.json({ success: false, error: "Idea ID is required" }, { status: 400 });
     }
+
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
 
     // 1. ideas テーブルからリポジトリ情報を取得 (is_public, share_token, active_commit_id に対応)
     let ideaData: any = null;
@@ -45,6 +47,15 @@ export async function GET(
       ideaData = tryWithAll.data;
     }
 
+    // 所有者隔離チェック: 非公開リポジトリは所有者本人のみ閲覧可能
+    const isPublic = ideaData.is_public ?? false;
+    if (!isPublic && (!authUserId || ideaData.user_id !== authUserId)) {
+      return NextResponse.json(
+        { success: false, error: "Forbidden: You do not have access to this private idea repository." },
+        { status: 403 }
+      );
+    }
+
     // 2. 該当 idea に属するすべてのコミット履歴を取得 (作成日時昇順)
     const { data: commits, error: commitsErr } = await supabaseAdmin
       .from("idea_commits")
@@ -67,7 +78,6 @@ export async function GET(
 
     // 4. share_token のフォールバック
     const shareToken = ideaData.share_token || ideaData.id;
-    const isPublic = ideaData.is_public ?? false;
 
     return NextResponse.json({
       success: true,
@@ -98,6 +108,23 @@ export async function PATCH(
     const { id } = await context.params;
     if (!id) {
       return NextResponse.json({ success: false, error: "Idea ID is required" }, { status: 400 });
+    }
+
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
+    const { data: targetIdea } = await supabaseAdmin
+      .from("ideas")
+      .select("id, user_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (!targetIdea) {
+      return NextResponse.json({ success: false, error: `Idea not found for ID: ${id}` }, { status: 404 });
+    }
+    if (!authUserId || targetIdea.user_id !== authUserId) {
+      return NextResponse.json(
+        { success: false, error: "Forbidden: You do not have permission to update this idea." },
+        { status: 403 }
+      );
     }
 
     const body = await req.json();
@@ -170,13 +197,30 @@ export async function PATCH(
  * DELETE /api/ideas/[id]
  */
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await context.params;
     if (!id) {
       return NextResponse.json({ success: false, error: "Idea ID is required" }, { status: 400 });
+    }
+
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
+    const { data: targetIdea } = await supabaseAdmin
+      .from("ideas")
+      .select("id, user_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (!targetIdea) {
+      return NextResponse.json({ success: false, error: `Idea not found for ID: ${id}` }, { status: 404 });
+    }
+    if (!authUserId || targetIdea.user_id !== authUserId) {
+      return NextResponse.json(
+        { success: false, error: "Forbidden: You do not have permission to delete this idea." },
+        { status: 403 }
+      );
     }
 
     // 1. 紐づく idea_commits を先に削除 (CASCADE未設定環境への安全策)

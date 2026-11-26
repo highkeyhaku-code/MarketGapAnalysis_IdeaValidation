@@ -25,6 +25,7 @@ import { PricingModal } from "../components/PricingModal";
 import { AuthWallModal } from "../components/AuthWallModal";
 import { GuestMigrationModal } from "../components/GuestMigrationModal";
 import { useUserSession } from "../hooks/useUserSession";
+import { getAuthHeaders } from "../lib/authClient";
 
 export default function GarageDashboard() {
   const router = useRouter();
@@ -68,9 +69,10 @@ export default function GarageDashboard() {
       setAnalyzingGenreName(genreNameToAnalyze);
       setSelectedGenre(genreNameToAnalyze);
 
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
       const res = await fetch("/api/market/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           genreName: genreNameToAnalyze,
         }),

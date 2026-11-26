@@ -41,6 +41,8 @@ import {
   CustomPlanetData,
 } from "../../../components/GravityMapVisualizer";
 import { useIdeaStore, IdeaCommitItem } from "../../../lib/store/useIdeaStore";
+import { useUserSession } from "../../../hooks/useUserSession";
+import { getAuthHeaders } from "../../../lib/authClient";
 import { IdeaCommitNode } from "../../../lib/treeTypes";
 import { computeCommitTreeVersions } from "../../../lib/versioning";
 import { EvaluatedCompanyNode } from "../../../lib/ai/evaluateMarket";
@@ -62,6 +64,8 @@ function IdeaRepositoryContent() {
   const [isPublic, setIsPublic] = useState<boolean>(false);
   const [shareToken, setShareToken] = useState<string>(ideaId || "");
   const [isUpdatingPublic, setIsUpdatingPublic] = useState(false);
+
+  const { loading: sessionLoading } = useUserSession();
 
   useEffect(() => {
     if (ideaData) {
@@ -85,7 +89,8 @@ function IdeaRepositoryContent() {
   const fetchIdeaRepository = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/ideas/${ideaId}`);
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/ideas/${ideaId}`, { headers });
       const json = await res.json();
 
       if (json.success && json.idea) {
@@ -118,9 +123,9 @@ function IdeaRepositoryContent() {
   };
 
   useEffect(() => {
-    if (!ideaId) return;
+    if (!ideaId || sessionLoading) return;
     fetchIdeaRepository();
-  }, [ideaId]);
+  }, [ideaId, sessionLoading]);
 
   const commits: IdeaCommitItem[] = ideaData?.idea_commits || [];
 
@@ -382,9 +387,10 @@ function IdeaRepositoryContent() {
     try {
       setIsUpdatingPublic(true);
       const nextPublic = !isPublic;
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
       const res = await fetch(`/api/ideas/${ideaId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ is_public: nextPublic }),
       });
       const json = await res.json();
@@ -408,8 +414,10 @@ function IdeaRepositoryContent() {
     if (!confirmed) return;
 
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch(`/api/ideas/${ideaId}`, {
         method: "DELETE",
+        headers,
       });
       const json = await res.json();
       if (json.success) {

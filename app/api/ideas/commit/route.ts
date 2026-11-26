@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin, getDefaultOrAuthUserId } from "../../../../lib/supabaseClient";
+import {
+  supabaseAdmin,
+  getDefaultOrAuthUserId,
+  getAuthenticatedUserIdFromRequest,
+} from "../../../../lib/supabaseClient";
 import { inngest } from "../../../../inngest/client";
 import { IdeaInputSchema, DomainType } from "../../../../schemas/zod";
 import { Json } from "../../../../types/database";
@@ -30,14 +34,15 @@ export async function POST(req: NextRequest) {
     // 1. Zod スキーマによる入力検証
     const validatedInput = IdeaInputSchema.parse(ideaInput);
 
-    const userId = await getDefaultOrAuthUserId(providedUserId);
+    const authUserId = await getAuthenticatedUserIdFromRequest(req);
+    const userId = authUserId || (await getDefaultOrAuthUserId(providedUserId));
     let ideaId = providedIdeaId;
 
-    // 2. ピボット時の ideaId 解決 (親コミットから親の idea_id を厳格に取得)
+    // 2. ピボット時の ideaId 解決 (親コミットから親の idea_id を厳格に取得 + 所有者チェック)
     if (parentCommitId) {
       const { data: parentCommit, error: parentErr } = await supabaseAdmin
         .from("idea_commits")
-        .select("id, idea_id")
+        .select("id, idea_id, ideas(user_id)")
         .eq("id", parentCommitId)
         .single();
 
@@ -48,7 +53,30 @@ export async function POST(req: NextRequest) {
           { status: 404 }
         );
       }
+
+      const parentOwnerId = (parentCommit as any).ideas?.user_id;
+      if (authUserId && parentOwnerId && parentOwnerId !== authUserId) {
+        return NextResponse.json(
+          { success: false, error: "Forbidden: You do not have permission to branch from this commit." },
+          { status: 403 }
+        );
+      }
+
       ideaId = parentCommit.idea_id;
+    } else if (ideaId && authUserId) {
+      // 既存 ideaId 指定時も所有者一致を検証
+      const { data: existingIdea } = await supabaseAdmin
+        .from("ideas")
+        .select("id, user_id")
+        .eq("id", ideaId)
+        .maybeSingle();
+
+      if (existingIdea && existingIdea.user_id !== authUserId) {
+        return NextResponse.json(
+          { success: false, error: "Forbidden: You do not have permission to commit to this idea." },
+          { status: 403 }
+        );
+      }
     }
 
     // 3. 親コミットも既存 ideaId も指定されていない完全新規作成時のみ ideas 親レコードを作成

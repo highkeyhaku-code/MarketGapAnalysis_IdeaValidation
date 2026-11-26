@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sparkles, Home, FileQuestion } from "lucide-react";
+import { getAuthHeaders } from "../../../../lib/authClient";
 
 /**
  * 旧結果画面のフォワードコンポーネント
@@ -20,7 +21,8 @@ export default function ValidationResultRedirectPage() {
 
     const forwardToRepositoryView = async () => {
       try {
-        const res = await fetch(`/api/ideas/commit/${commitId}`);
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/ideas/commit/${commitId}`, { headers });
         const json = await res.json();
         if (json.success && json.commit?.idea_id) {
           router.replace(`/ideas/${json.commit.idea_id}?commitId=${commitId}`);

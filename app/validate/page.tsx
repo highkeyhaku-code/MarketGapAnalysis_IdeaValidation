@@ -29,6 +29,7 @@ import { useBillingStore } from "../../lib/store/useBillingStore";
 import { upsertDraftToGuestSession } from "../../lib/guestSession";
 import { useIdeaStore } from "../../lib/store/useIdeaStore";
 import { isPortfolioMode } from "../../lib/portfolio";
+import { getAuthHeaders } from "../../lib/authClient";
 import { IdeaInput, PhysicalElement } from "../../schemas/zod";
 import { PivotSuggestionResponse } from "../api/ideas/pivot-suggestion/route";
 
@@ -55,6 +56,7 @@ function ValidateContent() {
   // プログレッシブサインアップ & セッション管理
   const {
     user,
+    loading: sessionLoading,
     isGuest,
     showAuthWall,
     showMigrationModal,
@@ -96,12 +98,13 @@ function ValidateContent() {
 
   // Time-Travel: 過去のコミットから状態を復元 (設計書 2.7 / 3.3)
   useEffect(() => {
-    if (!pivotFrom) return;
+    if (!pivotFrom || sessionLoading) return;
 
     const fetchPivotSource = async () => {
       try {
         setLoadingInitial(true);
-        const res = await fetch(`/api/ideas/commit/${pivotFrom}`);
+        const headers = await getAuthHeaders();
+        const res = await fetch(`/api/ideas/commit/${pivotFrom}`, { headers });
         const json = await res.json();
         if (json.success && json.commit) {
           const c = json.commit;
@@ -119,7 +122,7 @@ function ValidateContent() {
           // アイデア親情報と全コミット群を取得して Zustand ストアにセット
           if (c.idea_id) {
             try {
-              const ideasRes = await fetch("/api/ideas");
+              const ideasRes = await fetch("/api/ideas", { headers });
               const ideasJson = await ideasRes.json();
               if (ideasJson.success && Array.isArray(ideasJson.ideas)) {
                 const currentIdea = ideasJson.ideas.find((i: any) => i.id === c.idea_id);
@@ -145,7 +148,7 @@ function ValidateContent() {
     };
 
     fetchPivotSource();
-  }, [pivotFrom, setIdeaContext, setViewingCommit]);
+  }, [pivotFrom, sessionLoading, setIdeaContext, setViewingCommit]);
 
   // 最新状態へ即時復帰 (Checkout HEAD)
   const handleCheckoutLatest = () => {
@@ -192,9 +195,10 @@ function ValidateContent() {
         return;
       }
 
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
       const res = await fetch("/api/ideas/commit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           ideaInput: {
             q1_target_pain: data.q1_target_pain,

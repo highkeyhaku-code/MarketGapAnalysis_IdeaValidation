@@ -35,6 +35,7 @@ import { PricingModal } from "./PricingModal";
 import { useUserSession } from "../hooks/useUserSession";
 import { upsertDraftToGuestSession } from "../lib/guestSession";
 import { isPortfolioMode } from "../lib/portfolio";
+import { getAuthHeaders } from "../lib/authClient";
 
 export type KanbanColumnId = "DRAFT" | "DISCOVERED" | "VALIDATING" | "VALIDATED" | "ARCHIVED";
 
@@ -106,10 +107,14 @@ export function TheGarageKanban() {
   const [editingCardForWizard, setEditingCardForWizard] = useState<KanbanCardItem | null>(null);
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
 
-  // プログレッシブサインアップ & セッション管理
+  // プログレッシブサインアップ & 匿名認証セッション管理
   const {
     user,
+    loading: sessionLoading,
     isGuest,
+    isAnonymous,
+    hasSession,
+    authError,
     guestSession,
     showAuthWall,
     showMigrationModal,
@@ -124,14 +129,16 @@ export function TheGarageKanban() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // 1. アイデア・コミット一覧フェッチ (未ログイン時はローカルゲストセッションのみ、ログイン時は自ユーザーのDBデータ)
+  // 1. アイデア・コミット一覧フェッチ (セッションあり=通常ログインまたは匿名認証ならDBから自ユーザー分のみ取得)
   useEffect(() => {
+    if (sessionLoading) return;
+
     const fetchIdeasFromDb = async () => {
       try {
         setLoading(true);
 
-        // 未ログイン (ゲスト) の場合: サーバーのDBはフェッチせず、LocalStorageのゲストドラフトのみを表示
-        if (isGuest) {
+        // セッション未確立（非ポートフォリオの未ログイン、または匿名認証無効時のフォールバック）
+        if (!hasSession || !user?.id) {
           const guestDrafts = guestSession?.draftIdeas || [];
           const localCards: KanbanCardItem[] = guestDrafts.map((draft: any) => ({
             id: draft.id,
@@ -154,9 +161,10 @@ export function TheGarageKanban() {
           return;
         }
 
-        // ログイン済みの場合: 自ユーザーIDで絞り込んでフェッチ
-        const url = user?.id ? `/api/ideas?userId=${encodeURIComponent(user.id)}` : "/api/ideas";
-        const res = await fetch(url);
+        // 認証済み（通常ユーザー / 匿名認証ユーザー）: Bearer JWT で厳格に自分専用データのみ取得
+        const headers = await getAuthHeaders();
+        const url = `/api/ideas?userId=${encodeURIComponent(user.id)}`;
+        const res = await fetch(url, { headers });
         const json = await res.json();
         if (json.success && Array.isArray(json.ideas)) {
           const loadedCards: KanbanCardItem[] = [];
@@ -225,7 +233,7 @@ export function TheGarageKanban() {
     };
 
     fetchIdeasFromDb();
-  }, [isGuest, guestSession, user?.id]);
+  }, [sessionLoading, hasSession, guestSession, user?.id]);
 
   // ドラッグ＆ドロップ終了時のハンドラ
   const onDragEnd = async (result: DropResult) => {
@@ -266,9 +274,10 @@ export function TheGarageKanban() {
       let createdIdeaId: string | undefined;
 
       try {
+        const headers = await getAuthHeaders({ "Content-Type": "application/json" });
         const res = await fetch("/api/ideas/commit", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             ideaInput: {
               q1_target_pain: card.targetPain,
@@ -340,12 +349,12 @@ export function TheGarageKanban() {
     });
   };
 
-  // 新規ドラフトカード追加 (本番 DB に INSERT して正規 UUID を取得)
+  // 新規ドラフトカード追加 (セッション確立時は自分専用として本番 DB に INSERT して正規 UUID を取得)
   const handleAddNewDraft = async () => {
     try {
       setIsCreatingDraft(true);
 
-      if (isGuest) {
+      if (!hasSession || !user?.id) {
         const localId = crypto.randomUUID();
         const newCard: KanbanCardItem = {
           id: localId,
@@ -384,9 +393,10 @@ export function TheGarageKanban() {
         return;
       }
 
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
       const res = await fetch("/api/ideas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           title: "新規仮説ドラフト",
         }),
@@ -430,8 +440,10 @@ export function TheGarageKanban() {
     if (!confirmed) return;
 
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch(`/api/ideas/${ideaId}`, {
         method: "DELETE",
+        headers,
       });
       const json = await res.json();
 
@@ -458,10 +470,11 @@ export function TheGarageKanban() {
       showToast("🚀 アイデアコミットを作成し、仮説クラッシュ検証を開始します...", "info");
       
       const isLocal = Boolean(editingCardForWizard.isLocalDraft);
+      const headers = await getAuthHeaders({ "Content-Type": "application/json" });
 
       const res = await fetch("/api/ideas/commit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           ideaInput: {
             q1_target_pain: data.q1_target_pain,
@@ -523,7 +536,7 @@ export function TheGarageKanban() {
         </button>
       </div>
 
-      {/* 未ログイン時のローカル隔離表示バッジ (データ安全性の視覚的担保) */}
+      {/* 未ログイン・匿名セッション時のデータ隔離表示バッジ */}
       {isGuest && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-2xl text-xs text-amber-200 gap-3">
           <div className="flex items-center space-x-2.5">
@@ -532,16 +545,26 @@ export function TheGarageKanban() {
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-amber-300">
                   {isPortfolioMode()
-                    ? "ポートフォリオ・デモモード（完全ゲスト動作中）"
+                    ? isAnonymous && user?.id
+                      ? "ポートフォリオ・デモモード（匿名IDで完全隔離中）"
+                      : "ポートフォリオ・デモモード（ローカル隔離モード）"
                     : "ローカル保存データ（ゲストセッション: 48時間限定）"}
                 </span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {isPortfolioMode() ? "Demo Portfolio" : "隔離保護中"}
+                  {isPortfolioMode()
+                    ? isAnonymous && user?.id
+                      ? `Anon ${user.id.slice(0, 8)}`
+                      : "Demo Portfolio"
+                    : "隔離保護中"}
                 </span>
               </div>
               <p className="text-slate-400 text-[11px]">
                 {isPortfolioMode()
-                  ? "お使いのブラウザ内（LocalStorage）に安全に保持されます。ログイン不要で極限検証や探索など全機能を無制限に体験いただけます。"
+                  ? isAnonymous && user?.id
+                    ? "このブラウザ専用の匿名ユーザーIDが発行されています。他人のデータと完全に分離され、ページを閉じて開き直しても検証履歴が保持されます。"
+                    : authError
+                    ? "現在ローカルモードで動作しています（Supabase の Anonymous Sign-In を有効化するとクラウド完全隔離に切り替わります）。"
+                    : "お使いのブラウザ内に安全に保持されます。ログイン不要で極限検証や探索など全機能を体験いただけます。"
                   : "お使いのブラウザ内（LocalStorage）のみに安全に保持されています。他人のデータが表示されることは一切ありません。"}
               </p>
             </div>
