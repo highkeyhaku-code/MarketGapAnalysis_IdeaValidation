@@ -12,7 +12,7 @@ import { Json } from "../../types/database";
  * 非同期ジョブ: 市場分析＆重力マップ構築 (analyzeMarketAndBuildMap)
  * - 設計書 2.3 準拠: 時間正規化差分更新 (Delta Sync) による LLM 実行制御 (Level 1/2/3)
  * - 設計書 2.7 準拠: Supabase calculate_borda_top10 RPC による上位10社数理選定
- * - 429レート制限対策: concurrency limit = 12
+ * - 429レート制限対策: concurrency limit = 5 (Inngest Free プラン上限準拠)
  * - 自動リトライ: retries = 3 (指数バックオフ)
  * - フェイルソフト機構: Promise.allSettledで取得企業数5社未満ならリトライキューへ回す
  */
@@ -22,7 +22,7 @@ export const analyzeMarketAndBuildMap = inngest.createFunction(
     name: "Analyze Market and Build Gap Map",
     triggers: [{ event: "market/analyze.requested" }],
     concurrency: {
-      limit: 15,
+      limit: 5,
       key: "event.data.userId",
     },
     retries: 3,

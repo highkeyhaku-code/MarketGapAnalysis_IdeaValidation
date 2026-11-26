@@ -16,7 +16,7 @@ import { Json } from "../../types/database";
 /**
  * 非同期ジョブ: 仮説クラッシュ検証 (runHypothesisCrashJob)
  * 設計書 5.1 & 2.4.1 / 2.7 準拠
- * - 429レート制限対策: concurrency limit = 10
+ * - 429レート制限対策: concurrency limit = 5 (Inngest Free プラン上限準拠)
  * - 自動リトライ: retries = 3
  * - 競合スペック解析 & GitHub 死骸検索 & 3xペナルティスコア計算 & バイリンガル3ペルソナ審査 (TribunalFeedback)
  * - 最終ステップ (save-final-results-and-checkout-head) で正常完了時のみ HEAD を安全に更新 (Checkout)
@@ -27,7 +27,7 @@ export const runHypothesisCrashJob = inngest.createFunction(
     name: "Run Hypothesis Crash and Reality Validation",
     triggers: [{ event: "hypothesis/crash.requested" }],
     concurrency: {
-      limit: 10,
+      limit: 5,
       key: "event.data.userId",
     },
     retries: 3,
